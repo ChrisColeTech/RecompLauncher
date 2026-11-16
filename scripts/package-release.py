@@ -36,7 +36,9 @@ ENGINE_FILES = ('switchrecomp.py', 'nxloader.py', 'codegen.py', 'a64.py', 'nup.p
                 'tools/nxshader/nxs_live.py', 'tools/nxshader/nxs_front.py', 'tools/nxshader/nxs_cache.py',
                 'tools/nxshader/nxshader.py', 'tools/nxshader/nxs_spv.py', 'tools/nxshader/nxs_refl.py',
                 'tools/nxshader/dmsh_abi.py', 'tools/nxshader/dmsh_ampere.py', 'tools/nxshader/dmsh_meshstage.py',
-                'tools/nxshader/s2r_paths.py', 'tools/nxshader/xlate_bin/*')
+                'tools/nxshader/s2r_paths.py',
+                # the translator runs as 'dotnet dmsh_xlate.dll'; its extensionless macOS apphost is not shipped
+                'tools/nxshader/xlate_bin/*.dll', 'tools/nxshader/xlate_bin/*.json', 'tools/nxshader/xlate_bin/LICENSE-*.txt')
 # engine notices that move to legal/ (the runtime links libvpx statically, so its BSD notice ships with it)
 ENGINE_LEGAL = {'LICENSE.txt': 'LICENSE.txt', 'NOTICE.txt': 'NOTICE.txt', 'docs/THIRD_PARTY.md': 'THIRD_PARTY.md',
                 'runtime/vp9/LICENSE-libvpx.txt': 'licenses/libvpx/LICENSE-libvpx.txt',

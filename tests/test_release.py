@@ -71,7 +71,7 @@ class ReleaseChecks(unittest.TestCase):
         # what the old repository-mirror bundle shipped: none of it belongs in a release
         clutter = {'windows': ['engine/runtime/gpu.c', 'engine/runtime/edenvk/deps/zstd/lib/zstd.h', 'engine/tests/test_nup.py',
                                'engine/docs/THIRD_PARTY.md', 'engine/tool/get_deps.py', 'engine/tools/s2r_paths.py',
-                               'engine/tools/build_nvn.py', 'engine/runtime/vp9/win/libvpx.a', 'engine/tools/nxshader/run_split.py',
+                               'engine/tools/build_nvn.py', 'engine/runtime/vp9/win/libvpx.a', 'engine/tools/nxshader/run_split.py', 'engine/tools/nxshader/xlate_bin/dmsh_xlate',
                                'engine/LICENSE.txt', 'src/recomp_cli.py', 'scripts/_python.bat', '.gitignore', 'RecompLauncher.cmd',
                                'vc_redist.x64.exe', 'third_party/Switch2RECOMP/switchrecomp.py', 'bin/launcher/RecompLauncher.exe',
                                'docs/RELEASES.md', 'SwitchRecompLauncher.exe'],
@@ -218,11 +218,11 @@ class ReleaseChecks(unittest.TestCase):
 
     def test_engine_allowlist_takes_tracked_files_only(self):
         engine = self.root / 'engine checkout'
-        wanted = [p.replace('*', 'dmsh_xlate.dll') for p in package.ENGINE_FILES]
+        wanted = [p.replace('*.', 'dmsh_xlate.').replace('*', 'Ryujinx') for p in package.ENGINE_FILES]
         unwanted = ['runtime/gpu.c', 'runtime/rt.h', 'runtime/edenvk/deps/zstd/lib/zstd.h', 'tests/test_nup.py', 'docs/README.md',
                     'tool/get_deps.py', 'tools/s2r_paths.py', 'tools/build_nvn.py', 'tools/nxshader/run_split.py',
                     'runtime/vp9/win/libvpx.a', 'brt.py', 'tools_sym.py', 'tools/nxshader/__pycache__/nxs_live.cpython-314.pyc',
-                    'tools/nxshader/library.json', 'runtime/prod.keys']
+                    'tools/nxshader/library.json', 'runtime/prod.keys', 'tools/nxshader/xlate_bin/dmsh_xlate']
         for name in wanted + unwanted + ['untracked.py']:
             p = engine / name; p.parent.mkdir(parents=True, exist_ok=True); p.touch()
         listing = lambda command, cwd: '\0'.join(wanted + unwanted).encode()   # what git ls-files reports as tracked
