@@ -1,0 +1,4 @@
+[submodule "third_party/Switch2RECOMP"]
+	path = third_party/Switch2RECOMP
+	url = https://github.com/ChrisColeTech/Switch2RECOMP-turbo.git
+	branch = turbo

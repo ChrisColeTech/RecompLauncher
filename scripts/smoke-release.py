@@ -16,7 +16,7 @@ import tempfile
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / 'tests'))
+sys.path.insert(0, str(ROOT / 'third_party' / 'Switch2RECOMP' / 'tests'))   # engine's synthetic NUP helpers
 from test_nup import minimal_nso, write_nup
 spec = importlib.util.spec_from_file_location('release_package', ROOT / 'scripts/package-release.py')
 package = importlib.util.module_from_spec(spec)

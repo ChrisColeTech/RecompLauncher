@@ -73,15 +73,42 @@ synthetic test packages. The gallery image uses the launcher's non-persistent pr
 ```
 src/launcher/                   Qt 6 C++ launcher (this app)
 src/recomp_cli.py               build CLI entry point; drives the vendored engine
-third_party/Switch2RECOMP/      vendored engine: recompiler, runtime, Python modules, tests
+third_party/Switch2RECOMP/      engine submodule (turbo branch of the Switch2RECOMP-turbo fork)
 third_party/gcc/                portable GCC 16.2 toolchain (not committed; see setup)
 scripts/                        setup, build, run helpers
 docs/                           build guide, launcher guide, engine notes
+tests/                          launcher Python tests (workflow, release scripts, Python selection)
 bin/launcher/                   deployed launcher (build output)
 ```
 
-The launcher's Python regression tests live with the engine in
-`third_party/Switch2RECOMP/tests/`; the C++ test suites build with the launcher.
+Launcher Python tests live in `tests/`; engine tests stay in `third_party/Switch2RECOMP/tests/`. The C++
+test suites build with the launcher.
+
+### The engine submodule
+
+`third_party/Switch2RECOMP` is a git submodule pinned to a commit on the `turbo` branch of
+[Switch2RECOMP-turbo](https://github.com/ChrisColeTech/Switch2RECOMP-turbo): upstream SwitchRecomp plus
+the fork's engine enhancements, without the old Qt launcher. Clone with submodules:
+
+```bat
+git clone --recurse-submodules <this repo>
+rem or, in an existing clone:
+git submodule update --init
+```
+
+Engine changes are made and pushed in the fork, never only here. To pull upstream fixes and bump the pin:
+
+```bat
+rem in the fork checkout
+git fetch upstream
+git checkout main  && git merge --ff-only upstream/main && git push origin main
+git checkout turbo && git merge main && git push origin turbo
+rem here
+git submodule update --remote third_party/Switch2RECOMP
+rem rebuild + test, then commit the new pin
+```
+
+Merge (do not rebase) `turbo`: the pin is a commit id, and a rebase would orphan pinned commits.
 
 ## Building
 
@@ -116,8 +143,8 @@ RomFS copy and is read in place at runtime. NSP inputs need `prod.keys` installe
 ```bat
 .venv\Scripts\python.exe third_party\Switch2RECOMP\tests\test_nup.py -v
 .venv\Scripts\python.exe third_party\Switch2RECOMP\tests\test_nsp.py -v
-.venv\Scripts\python.exe third_party\Switch2RECOMP\tests\test_python_selection.py -v
-.venv\Scripts\python.exe third_party\Switch2RECOMP\tests\test_launcher_workflow.py -v
+.venv\Scripts\python.exe tests\test_python_selection.py -v
+.venv\Scripts\python.exe tests\test_launcher_workflow.py -v
 ```
 
 `test_launcher_workflow` exercises the deployed launcher end to end: it imports an existing native
