@@ -79,6 +79,9 @@ QString readRenderer(const QString& ini);
 bool samePath(const QString& left, const QString& right);
 bool inPlacePackage(const QString& path);
 QString toolkitProjectRoot(const QString& toolRoot);
+QStringList switchrSearchRoots(const QString& toolRoot);
+bool isReleaseEngine(const QString& toolRoot);
+QString recompCli(const QString& toolRoot);
 
 struct LibraryFilter {
     QString text;

@@ -9,12 +9,12 @@ Qt widgets using demonstration data, not game compatibility results. No games, k
 
 ## Start it
 
-For all-in-one releases, run `RecompLauncher.cmd` (Windows) or
-`./RecompLauncher.sh` (Linux). Download bundles from [the latest Turbo release](https://github.com/ChrisColeTech/RecompLauncher/releases/latest).
+For all-in-one releases, open `RecompLauncher.exe` (Windows) or
+`./RecompLauncher` (Linux) at the top of the extracted folder. Download bundles from [the latest Turbo release](https://github.com/ChrisColeTech/RecompLauncher/releases/latest).
 The following path is for a Windows developer checkout:
 
 ```powershell
-& ".\bin\launcher\SwitchRecompLauncher.exe"
+& ".\bin\launcher\RecompLauncher.exe"
 ```
 
 The entire `bin/launcher/` directory contains the Qt DLLs and plugins needed by the frontend. Do not move
@@ -185,14 +185,14 @@ create a venv or download packages. The launcher uses the same interpreter order
 & ".\scripts\build-launcher.bat" -QtPrefix "C:\Qt\6.8.3\msvc2022_64"
 ```
 
-Output: `bin/launcher/SwitchRecompLauncher.exe`; full build/test/deploy output: `logs/launcher_release.log`.
+Output: `bin/launcher/RecompLauncher.exe`; full build/test/deploy output: `logs/launcher_release.log`.
 
 Linux uses Qt 6.8.3 `gcc_64` with Widgets, Test and Image Formats, CMake, Ninja and a native C++ toolchain:
 
 ```sh
 export SWR_QT_PREFIX=/path/to/Qt/6.8.3/gcc_64
 sh scripts/build-launcher.sh
-./bin/launcher-linux/SwitchRecompLauncher
+./bin/launcher-linux/RecompLauncher
 ```
 
 Both frontend builds need an existing toolkit runtime to compile games. See
@@ -253,4 +253,4 @@ by `scripts/setup.bat`; .NET 10 is required for the live Vulkan shader translato
 tools without requiring the development-only `build/nvn/libnvn.a` to exist on the player's machine.
 
 Do not package personal `library.json` files, games, saves, extracted data, shader caches, captures, or logs.
-This native Qt launcher is `SwitchRecompLauncher.exe`.
+This native Qt launcher is `RecompLauncher.exe`.

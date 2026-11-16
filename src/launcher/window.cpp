@@ -217,7 +217,7 @@ void Window::createMenusAndToolbar(){
     auto* view=menuBar()->addMenu("&View");view->setObjectName("ViewMenu");view->addAction(galleryAction);view->addAction(tableAction);view->addSeparator();view->addAction(filterAction);view->addAction(backgroundAction);
     view->addAction("Refresh library",QKeySequence("F5"),this,[this]{invalidateArtwork();refreshTools();refreshLibrary();});
     view->addSeparator();view->addAction("View console",QKeySequence("Ctrl+L"),this,&Window::showBuildOutput);
-    auto* help=menuBar()->addMenu("&Help");help->addAction("About SwitchRecomp Launcher",this,[this]{message("SwitchRecomp Launcher","Build and launch your own game dumps from one library.\nNo games, keys, or firmware are included.\n\nEngine: Switch2RECOMP (AGPL-3.0) — see third_party/Switch2RECOMP/LICENSE.txt.\n\nNative controller input is supported. Vibration and some Switch 2 audio/video features remain incomplete.");});
+    auto* help=menuBar()->addMenu("&Help");help->addAction("About SwitchRecomp Launcher",this,[this]{message("SwitchRecomp Launcher","Build and launch your own game dumps from one library.\nNo games, keys, or firmware are included.\n\nEngine: Switch2RECOMP (AGPL-3.0) — see legal/LICENSE.txt in the release (third_party/Switch2RECOMP/LICENSE.txt in a source checkout).\n\nNative controller input is supported. Vibration and some Switch 2 audio/video features remain incomplete.");});
 
     auto* bar=addToolBar("Commands");bar->setObjectName("Commands");bar->setMovable(false);bar->setIconSize({32,32});bar->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
     auto* addButton=new QToolButton;addButton->setObjectName("AddGameButton");addButton->setDefaultAction(addAction);addButton->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);addButton->setIconSize({32,32});
@@ -454,7 +454,9 @@ void Window::showSettings(int initialTab){
     auto* toolkit=tabForm(tabs,"Engine");auto* root=new QLineEdit(library.toolRoot);toolkit->addRow("Engine folder",browseField(root,&dialog,"Choose the vendored engine folder (optional)",{},true));
     auto* health=textLabel(healthText,"Muted");health->setWordWrap(true);health->setTextInteractionFlags(Qt::TextSelectableByMouse);toolkit->addRow(health);
     connect(this,&Window::toolsChanged,&dialog,[this,health]{health->setText(healthText);});
-    auto* guide=new QPushButton("Open setup guide");toolkit->addRow("",guide);connect(guide,&QPushButton::clicked,&dialog,[this]{QDesktopServices::openUrl(QUrl::fromLocalFile(QDir(toolkitProjectRoot(library.toolRoot)).filePath("docs/BUILD_ENVIRONMENT_GUIDE.md")));});
+    // the setup guide is a source-checkout document; a release has nothing to set up and does not ship docs/
+    const QString guidePath=QDir(toolkitProjectRoot(library.toolRoot)).filePath("docs/BUILD_ENVIRONMENT_GUIDE.md");
+    if(QFileInfo(guidePath).isFile()){auto* guide=new QPushButton("Open setup guide");toolkit->addRow("",guide);connect(guide,&QPushButton::clicked,&dialog,[guidePath]{QDesktopServices::openUrl(QUrl::fromLocalFile(guidePath));});}
     auto* builds=tabForm(tabs,"Build defaults");auto* output=new QLineEdit(library.outputRoot);output->setPlaceholderText("Empty: create builds beside the source package");builds->addRow("Build location",browseField(output,&dialog,"Choose default output folder",{},true));
     auto* workers=new QSpinBox;workers->setRange(1,64);workers->setValue(library.jobs);builds->addRow("Compiler workers",workers);
     auto* appearance=tabForm(tabs,"Appearance");

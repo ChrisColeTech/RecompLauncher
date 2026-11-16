@@ -18,7 +18,7 @@ ROOT = REPO / 'third_party' / 'Switch2RECOMP'       # engine submodule
 
 class LauncherWorkflow(unittest.TestCase):
     def test_import_existing_build_without_compiling(self):
-        binary = REPO / 'bin/launcher/SwitchRecompLauncher.exe'
+        binary = REPO / 'bin/launcher/RecompLauncher.exe'
         self.assertTrue(binary.is_file(), 'Build the Qt launcher first')
         with tempfile.TemporaryDirectory(prefix='launcher import spaces ') as tmp:
             work = Path(tmp)
@@ -50,7 +50,7 @@ class LauncherWorkflow(unittest.TestCase):
                 self.assertEqual(exe.read_bytes(), b'fixture, never execute')
 
     def test_build_saves_ready_library_entry(self):
-        binary = REPO / 'bin/launcher/SwitchRecompLauncher.exe'
+        binary = REPO / 'bin/launcher/RecompLauncher.exe'
         self.assertTrue(binary.is_file(), 'Build the Qt launcher first: scripts/build-launcher.bat')
         (ROOT / 'build').mkdir(parents=True, exist_ok=True)
         with tempfile.TemporaryDirectory(prefix='launcher-', dir=ROOT / 'build') as tmp:

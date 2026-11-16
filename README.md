@@ -158,7 +158,7 @@ actual `BuildManager`/`QProcess` path, asserting the ready-to-play library entry
 ## Licensing
 
 The vendored engine keeps its own notices: AGPL-3.0, see
-`third_party/Switch2RECOMP/LICENSE.txt` and `third_party/Switch2RECOMP/NOTICE.txt`. The Qt
+`third_party/Switch2RECOMP/LICENSE.txt` and `third_party/Switch2RECOMP/NOTICE.txt` (`legal/` in a release). The Qt
 launcher source in `src/` is this repository's own work. Game builds stage the engine's shader
 translation helper under the output directory; it requires the Python interpreter recorded at
 build time and, only for the optional Vulkan renderer, .NET 10. The standard OpenGL runtime needs

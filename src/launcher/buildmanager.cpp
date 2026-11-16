@@ -36,7 +36,7 @@ BuildManager::BuildManager(QObject* parent) : QObject(parent) {
     });
 }
 QStringList BuildManager::arguments(const Game& game, const Toolchain& tools, int jobs) {
-    return {"-u", QDir(toolkitProjectRoot(tools.root)).filePath("src/recomp_cli.py"), game.source,
+    return {"-u", recompCli(tools.root), game.source,
         "--outdir", game.buildDir, "-o", game.outputName, "--target", nativeTarget, "--backend", nativeBackend,
         "--cc", tools.compiler, "--jobs", QString::number(qBound(1, game.workers ? game.workers : jobs, 64)),
         "-O", QString::number(qBound(0, game.optimization, 3)), "--runtime", tools.runtime};

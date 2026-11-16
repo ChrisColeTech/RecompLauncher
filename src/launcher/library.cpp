@@ -23,7 +23,7 @@ QString tool(const QString& root, const QStringList& choices, const QString& fal
     return fallback.isEmpty() ? QString{} : QStandardPaths::findExecutable(fallback);
 }
 bool fail(QString* error, const QString& message) { if (error) *error = message; return false; }
-QString pythonTool(const QString& root, const QStringList& choices, const QString& fallback) {
+QString pythonTool(const QStringList& roots, const QStringList& choices, const QString& fallback) {
     const auto runnable=[](const QString& path) {
         if(path.isEmpty())return false;
         QProcess process;process.start(path,{"-c","import sys; sys.exit(sys.version_info < (3, 8))"});
@@ -35,17 +35,26 @@ QString pythonTool(const QString& root, const QStringList& choices, const QStrin
         const QString path=QStandardPaths::findExecutable(override);
         return runnable(path)?path:QString{};
     }
-    for(const auto& choice:choices){const auto path=tool(root,{choice});if(runnable(path))return path;}
+    for(const auto& choice:choices)for(const auto& root:roots){const auto path=tool(root,{choice});if(runnable(path))return path;}
     const auto path=QStandardPaths::findExecutable(fallback);return runnable(path)?path:QString{};
 }
 }
 
-// In a repository checkout the engine lives under <project>/third_party/Switch2RECOMP while shared
-// folders (.venv, gcc, bin, docs, shader-tools) stay at the project root; a portable release keeps
-// everything flat beside switchrecomp.py. Search both.
+// Two layouts, checked in this order:
+//  release:  <release>/RecompLauncher(.exe), <release>/engine (switchrecomp.py, recomp_cli.py) and the shared tools in
+//            <release>/toolchain (python, gcc, dotnet, shader-tools); Linux keeps the bundled shared libraries in <release>/lib
+//  checkout: <project>/third_party/Switch2RECOMP with .venv, third_party/gcc, bin/launcher at <project>
+// Anything else (an engine folder chosen in the settings) is searched on its own.
+bool isReleaseEngine(const QString& root) {
+    return !root.isEmpty() && QFileInfo(QDir(absolute(root)).filePath("../toolchain")).isDir();
+}
+
 QStringList switchrSearchRoots(const QString& root) {
-    QStringList roots{root};
-    const QString parent = QDir::cleanPath(absolute(root) + "/..");
+    if (root.isEmpty()) return {};
+    const QString engine = absolute(root);
+    const QString parent = QDir::cleanPath(engine + "/..");
+    if (isReleaseEngine(engine)) return {engine, parent + "/toolchain", parent};
+    QStringList roots{engine};
     if (QFileInfo(parent).fileName().compare("third_party", Qt::CaseInsensitive) == 0)
         roots << QDir::cleanPath(parent + "/..");
     return roots;
@@ -53,7 +62,13 @@ QStringList switchrSearchRoots(const QString& root) {
 
 QString toolkitProjectRoot(const QString& root) {
     const QStringList roots = switchrSearchRoots(root);
-    return roots.size() > 1 ? roots.last() : (root.isEmpty() ? QString{} : absolute(root));
+    return roots.isEmpty() ? QString{} : roots.last();
+}
+
+QString recompCli(const QString& root) {
+    const QString beside = QDir(absolute(root)).filePath("recomp_cli.py");   // release: shipped inside engine/
+    if (QFileInfo(beside).isFile()) return beside;
+    return QDir(toolkitProjectRoot(root)).filePath("src/recomp_cli.py");    // checkout
 }
 
 QString Game::executable() const { return QDir(buildDir).filePath(outputName + executableSuffix); }
@@ -97,8 +112,8 @@ Game Game::fromJson(const QJsonObject& o) {
 
 bool Toolchain::canBuild() const { return problem().isEmpty(); }
 QString Toolchain::problem() const {
-    if (root.isEmpty()) return "The engine was not found. It ships in third_party/Switch2RECOMP; set it in File > Settings > Engine if you relocated it.";
-    if (!QFileInfo(QDir(root).filePath("switchrecomp.py")).isFile()) return "The engine folder is incomplete: switchrecomp.py is missing. Restore third_party/Switch2RECOMP or set it in File > Settings > Engine.";
+    if (root.isEmpty()) return "The engine was not found. It ships in the engine folder beside RecompLauncher (third_party/Switch2RECOMP in a source checkout); set it in File > Settings > Engine if you moved it.";
+    if (!QFileInfo(QDir(root).filePath("switchrecomp.py")).isFile()) return "The engine folder is incomplete: switchrecomp.py is missing. Extract the release again or set it in File > Settings > Engine.";
     if (python.isEmpty()) return "Python is missing or SWR_PYTHON is invalid. Check SWR_PYTHON, .venv/venv, or the portable Python bundle.";
     if (compiler.isEmpty()) return "GCC is missing. Extract the complete engine bundle or run the setup script.";
     if (runtime.isEmpty()) return "The native runtime is missing. Extract the complete engine bundle or build the runtime first.";
@@ -109,18 +124,18 @@ Toolchain Toolchain::find(const QString& root) {
     t.root = absolute(root);
     const QStringList roots = switchrSearchRoots(t.root);
 #ifdef Q_OS_WIN
-    t.python = pythonTool(t.root, {".venv/Scripts/python.exe", "../../.venv/Scripts/python.exe", "venv/Scripts/python.exe", "../../venv/Scripts/python.exe", "python/python.exe", "../../python/python.exe"}, "python.exe");
+    t.python = pythonTool(roots, {".venv/Scripts/python.exe", "venv/Scripts/python.exe", "python/python.exe"}, "python.exe");
     for (const auto& search : roots) {
-        if (t.compiler.isEmpty()) t.compiler = tool(search, {"gcc/Library/bin/x86_64-w64-mingw32-gcc.exe", "../../third_party/gcc/Library/bin/x86_64-w64-mingw32-gcc.exe", "third_party/gcc/Library/bin/x86_64-w64-mingw32-gcc.exe", "gcc/bin/gcc.exe", "../../third_party/gcc/bin/gcc.exe", "third_party/gcc/bin/gcc.exe", "w64devkit/bin/gcc.exe"});
+        if (t.compiler.isEmpty()) t.compiler = tool(search, {"gcc/Library/bin/x86_64-w64-mingw32-gcc.exe", "third_party/gcc/Library/bin/x86_64-w64-mingw32-gcc.exe", "gcc/bin/gcc.exe", "third_party/gcc/bin/gcc.exe", "w64devkit/bin/gcc.exe"});
         if (t.runtime.isEmpty()) t.runtime = tool(search, {"bin/runtime_win64_win32.exe"});
         if (t.dotnet.isEmpty()) t.dotnet = tool(search, {"dotnet/dotnet.exe"});
     }
     if (t.compiler.isEmpty()) t.compiler = QStandardPaths::findExecutable("gcc.exe");
     if (t.dotnet.isEmpty()) t.dotnet = QStandardPaths::findExecutable("dotnet.exe");
 #else
-    t.python = pythonTool(t.root, {".venv/bin/python3", "../../.venv/bin/python3", "venv/bin/python3", "../../venv/bin/python3", "python/bin/python3", "../../python/bin/python3"}, "python3");
+    t.python = pythonTool(roots, {".venv/bin/python3", "venv/bin/python3", "python/bin/python3"}, "python3");
     for (const auto& search : roots) {
-        if (t.compiler.isEmpty()) t.compiler = tool(search, {"gcc/bin/x86_64-conda-linux-gnu-gcc", "../../third_party/gcc/bin/x86_64-conda-linux-gnu-gcc", "third_party/gcc/bin/x86_64-conda-linux-gnu-gcc", "gcc/bin/gcc"});
+        if (t.compiler.isEmpty()) t.compiler = tool(search, {"gcc/bin/x86_64-conda-linux-gnu-gcc", "third_party/gcc/bin/x86_64-conda-linux-gnu-gcc", "gcc/bin/gcc"});
         if (t.runtime.isEmpty()) t.runtime = tool(search, {"bin/runtime_linux_x11"});
         if (t.dotnet.isEmpty()) t.dotnet = tool(search, {"dotnet/dotnet"});
     }
@@ -143,10 +158,11 @@ QProcessEnvironment Toolchain::environment() const {
             paths << shaderTools; env.insert("NXSHADER_TOOLS", shaderTools); break;
         }
     }
-    for (const auto& search : roots) {
-        const QString launcherDir = QDir(search).filePath("bin/launcher");
-        if (QDir(launcherDir).exists()) { paths << launcherDir; break; }
-    }
+    // the launcher's own folder: <project>/bin/launcher in a checkout, the release root in a release
+    QString launcherDir;
+    for (const auto& search : roots) if (launcherDir.isEmpty() && QDir(QDir(search).filePath("bin/launcher")).exists()) launcherDir = QDir(search).filePath("bin/launcher");
+    if (launcherDir.isEmpty() && isReleaseEngine(root)) launcherDir = roots.last();
+    if (!launcherDir.isEmpty()) paths << launcherDir;
     for (const auto& binary : {python, compiler, dotnet}) if (!binary.isEmpty()) paths << QFileInfo(binary).absolutePath();
     paths << env.value("PATH"); env.insert("PATH", paths.join(QDir::listSeparator()));
     if (!python.isEmpty()) env.insert("SWR_PYTHON", python);
@@ -164,7 +180,9 @@ QProcessEnvironment Toolchain::environment() const {
     return env;
 }
 QString Toolchain::discoverRoot() {
-    QDir dir(QCoreApplication::applicationDirPath());
+    const QDir app(QCoreApplication::applicationDirPath());
+    if (QFileInfo(app.filePath("engine/switchrecomp.py")).isFile()) return QDir(app.filePath("engine")).absolutePath();   // release
+    QDir dir = app;   // checkout: bin/launcher (or a build folder) somewhere below <project>
     for (int i = 0; i < 8; ++i) {
         if (QFileInfo(dir.filePath("switchrecomp.py")).isFile()) return dir.absolutePath();
         const QString vendored = dir.filePath("third_party/Switch2RECOMP/switchrecomp.py");

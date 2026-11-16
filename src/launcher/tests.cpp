@@ -38,6 +38,41 @@ private slots:
         QVERIFY(QFile::remove(tmp.filePath("venv/"+suffix)));QCOMPARE(Toolchain::find(tmp.path()).python,tmp.filePath(bundle));
         QVERIFY(QFile::remove(tmp.filePath(bundle)));QCOMPARE(Toolchain::find(tmp.path()).python,tmp.filePath(fallback));
     }
+    void releaseAndCheckoutLayouts() {
+        const auto oldPython=qgetenv("SWR_PYTHON");const bool hadPython=qEnvironmentVariableIsSet("SWR_PYTHON");
+        const auto restore=qScopeGuard([&]{if(hadPython)qputenv("SWR_PYTHON",oldPython);else qunsetenv("SWR_PYTHON");});
+        qunsetenv("SWR_PYTHON");
+#ifdef Q_OS_WIN
+        const QString python="python/python.exe",venv=".venv/Scripts/python.exe",gcc="gcc/Library/bin/x86_64-w64-mingw32-gcc.exe",
+            runtime="bin/runtime_win64_win32.exe",dotnet="dotnet/dotnet.exe",shaders="shader-tools/Library/bin";
+#else
+        const QString python="python/bin/python3",venv=".venv/bin/python3",gcc="gcc/bin/x86_64-conda-linux-gnu-gcc",
+            runtime="bin/runtime_linux_x11",dotnet="dotnet/dotnet",shaders="shader-tools/bin";
+#endif
+        const auto stage=[](const QDir& dir,const QString& relative){const auto path=dir.filePath(relative);QDir().mkpath(QFileInfo(path).absolutePath());return QFile::copy(QCoreApplication::applicationFilePath(),path);};
+        // release: <top>/engine + <top>/toolchain; the CLI ships inside engine/
+        QTemporaryDir release(QDir::tempPath()+"/swr release spaces-XXXXXX");QVERIFY(release.isValid());const QDir top(release.path());
+        for(const auto& name:{QString("engine/switchrecomp.py"),QString("engine/recomp_cli.py"),"engine/"+runtime,"toolchain/"+python,"toolchain/"+gcc,"toolchain/"+dotnet})QVERIFY(stage(top,name));
+        QVERIFY(top.mkpath("toolchain/"+shaders));
+        const QString engine=top.filePath("engine");QVERIFY(isReleaseEngine(engine));
+        QCOMPARE(switchrSearchRoots(engine),QStringList({engine,top.filePath("toolchain"),top.absolutePath()}));
+        auto tools=Toolchain::find(engine);
+        QCOMPARE(tools.python,top.filePath("toolchain/"+python));QCOMPARE(tools.compiler,top.filePath("toolchain/"+gcc));
+        QCOMPARE(tools.runtime,top.filePath("engine/"+runtime));QCOMPARE(tools.dotnet,top.filePath("toolchain/"+dotnet));
+        QVERIFY2(tools.canBuild(),qPrintable(tools.problem()));
+        QCOMPARE(BuildManager::arguments(Game{},tools,1)[1],top.filePath("engine/recomp_cli.py"));
+        const auto env=tools.environment();QCOMPARE(QDir(env.value("NXSHADER_TOOLS")),QDir(top.filePath("toolchain/"+shaders)));
+        QVERIFY(env.value("PATH").split(QDir::listSeparator()).contains(top.absolutePath()));
+        // checkout: <project>/third_party/Switch2RECOMP, .venv and third_party/gcc at <project>, CLI in src/
+        QTemporaryDir checkout(QDir::tempPath()+"/swr checkout spaces-XXXXXX");QVERIFY(checkout.isValid());const QDir project(checkout.path());
+        for(const auto& name:{QString("third_party/Switch2RECOMP/switchrecomp.py"),"third_party/Switch2RECOMP/"+runtime,venv,"third_party/"+gcc})QVERIFY(stage(project,name));
+        const QString vendored=project.filePath("third_party/Switch2RECOMP");QVERIFY(!isReleaseEngine(vendored));
+        tools=Toolchain::find(vendored);
+        QCOMPARE(tools.python,project.filePath(venv));QCOMPARE(tools.compiler,project.filePath("third_party/"+gcc));
+        QCOMPARE(tools.runtime,project.filePath("third_party/Switch2RECOMP/"+runtime));
+        QCOMPARE(BuildManager::arguments(Game{},tools,1)[1],project.filePath("src/recomp_cli.py"));
+        QCOMPARE(toolkitProjectRoot(vendored),project.absolutePath());
+    }
     void discoverNspBuildAndPreserveLibrary() {
         QTemporaryDir tmp;const auto build=tmp.filePath("MKW NSP build");QVERIFY(QDir().mkpath(build+"/Mario Kart World 180_data"));
         const auto source=tmp.filePath("Mario Kart World 1.8.0.nsp");

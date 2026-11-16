@@ -4,7 +4,8 @@
 # Run the deployed Qt launcher from a developer checkout.
 set -eu
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-launcher="$root/bin/launcher/SwitchRecompLauncher"
+launcher="$root/bin/launcher-linux/RecompLauncher"
+[ -f "$launcher" ] || launcher="$root/bin/launcher/RecompLauncher"
 if [ ! -x "$launcher" ] && [ ! -f "$launcher" ]; then
   echo "[RUN] Launcher not found: $launcher" >&2
   echo 'Build it first with: SWR_QT_PREFIX=... sh scripts/build-launcher.sh' >&2

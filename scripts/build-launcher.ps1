@@ -54,8 +54,8 @@ try {
     )
     & cmd.exe /d /c ("(" + ($commands -join ' && ') + ") > `"$log`" 2>&1")
     if ($LASTEXITCODE) { throw "Build/tests failed. See $log" }
-    Copy-Item -LiteralPath "$build\bin\SwitchRecompLauncher.exe" -Destination $deploy -Force
-    $deployCommand = "call `"$vcvars`" >nul && `"$QtPrefix\bin\windeployqt.exe`" --$($Config.ToLower()) --no-translations --no-system-d3d-compiler --no-opengl-sw `"$deploy\SwitchRecompLauncher.exe`""
+    Copy-Item -LiteralPath "$build\bin\RecompLauncher.exe" -Destination $deploy -Force
+    $deployCommand = "call `"$vcvars`" >nul && `"$QtPrefix\bin\windeployqt.exe`" --$($Config.ToLower()) --no-translations --no-system-d3d-compiler --no-opengl-sw --no-compiler-runtime `"$deploy\RecompLauncher.exe`""
     & cmd.exe /d /c ($deployCommand + " >> `"$log`" 2>&1")
     if ($LASTEXITCODE) { throw "Qt deployment failed. See $log" }
     $redist = Get-ChildItem -LiteralPath (Join-Path $vs 'VC\Redist\MSVC') -Directory | Sort-Object Name -Descending | Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName 'x64\Microsoft.VC143.CRT') } | Select-Object -First 1
@@ -63,7 +63,7 @@ try {
     Copy-Item -Path (Join-Path $redist.FullName 'x64\Microsoft.VC143.CRT\*.dll') -Destination $deploy -Force
     Copy-Item -LiteralPath (Join-Path $QtPrefix 'plugins\platforms\qoffscreen.dll') -Destination (Join-Path $deploy 'platforms') -Force
     if (-not (Test-Path -LiteralPath (Join-Path $deploy 'imageformats\qwebp.dll'))) { throw 'Qt WebP plugin was not deployed.' }
-    "[LAUNCHER] SUCCESS - $deploy\SwitchRecompLauncher.exe"
+    "[LAUNCHER] SUCCESS - $deploy\RecompLauncher.exe"
     "[LOG] $log"
 } catch {
     Write-Error $_
