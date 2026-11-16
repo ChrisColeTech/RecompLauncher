@@ -91,8 +91,8 @@ QDockWidget { border: 1px solid @border; }
 QDockWidget::title { background: @raised; padding: 6px 8px; text-align: left; }
 QStatusBar { background: @surface; border-top: 1px solid @border; }
 QStatusBar::item { border: none; }
-QToolButton#StatusSettings { border: none; background: transparent; padding: 3px 9px; }
-QToolButton#StatusSettings:hover, QToolButton#StatusSettings:focus { background: @hover; }
+QToolButton#StatusSettings { border: none; background: transparent; border-radius: 9px; padding: 2px 10px; font-size: 11px; font-weight: 600; color: @muted; }
+QToolButton#StatusSettings:hover, QToolButton#StatusSettings:focus { background: @selected; color: @text; }
 QLabel#ToolBadge { border-radius: 9px; padding: 2px 10px; font-size: 11px; font-weight: 600; }
 QLabel#ToolBadge[badge="ok"] { background: @selected; color: @accent; }
 QLabel#ToolBadge[badge="error"] { background: @selected; color: #e06c60; }

@@ -22,8 +22,10 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QFormLayout>
+#include <QGraphicsDropShadowEffect>
 #include <QHeaderView>
 #include <QImageReader>
+#include <QKeyEvent>
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
@@ -282,7 +284,7 @@ void Window::createStatusBar(){
     selectionLabel=textLabel("No selection");selectionLabel->setMinimumWidth(100);selectionLabel->setMaximumWidth(410);statusBar()->addWidget(selectionLabel,1);
     jobLabel=textLabel("","Muted");jobLabel->setMaximumWidth(320);statusBar()->addPermanentWidget(jobLabel);
     toolStatus=textLabel("Checking…","ToolBadge");toolStatus->setCursor(Qt::PointingHandCursor);toolStatus->installEventFilter(this);statusBar()->addPermanentWidget(toolStatus);
-    auto* settings=new QToolButton;settings->setObjectName("StatusSettings");settings->setDefaultAction(settingsAction);settings->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);settings->setIconSize({17,17});statusBar()->addPermanentWidget(settings);
+    auto* settings=new QToolButton;settings->setObjectName("StatusSettings");settings->setDefaultAction(settingsAction);settings->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);settings->setIconSize({13,13});statusBar()->addPermanentWidget(settings);
 }
 
 Game* Window::selected(){return library.find(selectedId);}
@@ -528,17 +530,45 @@ void Window::showContextMenu(const QPoint& point){QMenu menu(this);menu.addActio
 
 bool Window::eventFilter(QObject* watched,QEvent* event){
     if(watched==toolStatus&&event->type()==QEvent::MouseButtonRelease){showToolPopup();return true;}
+    if(toolPopup&&watched==toolPopup&&event->type()==QEvent::KeyPress&&static_cast<QKeyEvent*>(event)->key()==Qt::Key_Escape){toolPopup->close();return true;}
     return QMainWindow::eventFilter(watched,event);
 }
 
 void Window::showToolPopup(){
-    QMenu menu(this);
+    if(toolPopup){toolPopup->close();toolPopup.clear();}
     const bool ready=tools.canBuild();
-    menu.addAction(ready?"All build tools found":"Build setup problem")->setEnabled(false);
-    menu.addAction(ready?displayPath(tools.root):tools.problem())->setEnabled(false);
-    menu.addSeparator();
-    menu.addAction(settingsAction);
-    menu.exec(toolStatus->mapToGlobal(QPoint(toolStatus->width()/2,-menu.sizeHint().height()-8)));
+    auto* frame=new QFrame(this,Qt::Popup|Qt::FramelessWindowHint);
+    toolPopup=frame;
+    frame->setAttribute(Qt::WA_TranslucentBackground);
+    frame->setAttribute(Qt::WA_DeleteOnClose);
+    frame->installEventFilter(this);
+    auto* outer=new QVBoxLayout(frame);outer->setContentsMargins(14,10,14,18);
+    auto* card=new QFrame;card->setObjectName("FilterCard");outer->addWidget(card);
+    auto* shadow=new QGraphicsDropShadowEffect(card);shadow->setBlurRadius(24);shadow->setOffset(0,6);shadow->setColor(QColor(0,0,0,190));card->setGraphicsEffect(shadow);
+    auto* layout=new QVBoxLayout(card);layout->setContentsMargins(18,16,18,16);layout->setSpacing(10);
+    auto* heading=new QHBoxLayout;
+    auto* title=new QLabel(ready?"Build tools":"Build setup problem");title->setObjectName("PopupTitle");heading->addWidget(title);heading->addStretch();
+    auto* close=new QPushButton("×");close->setAccessibleName("Close build tools popup");close->setFixedWidth(30);close->setToolTip("Close (Esc)");heading->addWidget(close);
+    layout->addLayout(heading);
+    if(ready){
+        auto* body=new QLabel(healthText);body->setObjectName("Muted");body->setWordWrap(true);body->setTextInteractionFlags(Qt::TextSelectableByMouse);layout->addWidget(body);
+    } else {
+        auto* body=new QLabel(tools.problem());body->setWordWrap(true);body->setTextInteractionFlags(Qt::TextSelectableByMouse);layout->addWidget(body);
+        auto* divider=new QFrame;divider->setObjectName("FilterDivider");divider->setFixedHeight(1);layout->addWidget(divider);
+        auto* health=new QLabel(healthText);health->setObjectName("Muted");health->setWordWrap(true);health->setTextInteractionFlags(Qt::TextSelectableByMouse);layout->addWidget(health);
+    }
+    auto* actions=new QHBoxLayout;actions->addStretch();
+    auto* settings=new QPushButton("Open Settings");settings->setObjectName("AccentButton");actions->addWidget(settings);layout->addLayout(actions);
+    connect(close,&QPushButton::clicked,frame,&QWidget::close);
+    connect(settings,&QPushButton::clicked,frame,[this,frame]{frame->close();showSettings();});
+    frame->setFixedWidth(380);frame->adjustSize();
+    QPoint location=toolStatus->mapToGlobal(QPoint(toolStatus->width()-frame->width(),-frame->height()-6));
+    if(auto* screen=toolStatus->screen()){
+        const QRect available=screen->availableGeometry();
+        location.setX(qBound(available.left(),location.x(),qMax(available.left(),available.right()-frame->width()+1)));
+        location.setY(qBound(available.top(),location.y(),qMax(available.top(),available.bottom()-frame->height()+1)));
+    }
+    frame->move(location);frame->show();frame->raise();frame->setFocus();
 }
 void Window::dragEnterEvent(QDragEnterEvent* event){if(event->mimeData()->hasUrls())event->acceptProposedAction();}
 void Window::dropEvent(QDropEvent* event){for(const auto& url:event->mimeData()->urls()){if(!url.isLocalFile())continue;const auto path=url.toLocalFile();Game game;QString error;if(gameFromExecutable(path,&game,&error))importBuild(path);else importSource(path);}event->acceptProposedAction();}

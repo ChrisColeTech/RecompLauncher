@@ -4,10 +4,12 @@
 #include "buildmanager.h"
 #include <QMainWindow>
 #include <QMap>
+#include <QPointer>
 
 class LibraryCanvas;
 class GameCard;
 class FilterPopup;
+class QFrame;
 class QAction;
 class QComboBox;
 class QDockWidget;
@@ -91,6 +93,7 @@ private:
     QDockWidget* buildDock = nullptr;
     QPlainTextEdit* console = nullptr;
     QProgressBar* progress = nullptr;
+    QPointer<QFrame> toolPopup;
     QString buildPhase;
     int buildCurrent = 0, buildTotal = 0;
     QAction *addAction = nullptr, *addFolderAction = nullptr, *importAction = nullptr, *playAction = nullptr,
