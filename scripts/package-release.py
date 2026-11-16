@@ -29,9 +29,9 @@ RELEASE_ENGINE, TOOLCHAIN, LEGAL = Path('engine'), Path('toolchain'), Path('lega
 TOOLS = ('python', 'gcc', 'dotnet', 'shader-tools')
 # Engine files a game build reads, as tracked in the submodule; everything else there builds the runtime or is
 # developer tooling. switchrecomp.py imports nxloader + codegen; codegen imports a64; nxloader imports nup + nsp
-# (packages, hactool). Generated C is compiled with -I runtime and includes only cpu.h and cpu_helpers.c, which
-# also key the object cache. copy_nxshader() stages tools/nxshader into every game, plus runtime/nvn/gfx/dmsh_abi.h.
-ENGINE_FILES = ('switchrecomp.py', 'nxloader.py', 'codegen.py', 'a64.py', 'nup.py', 'nsp.py',
+# (packages, hactool) + zbic (Switch 2 ZBIC-compressed NSOs). Generated C is compiled with -I runtime and includes
+# only cpu.h and cpu_helpers.c, which also key the object cache. copy_nxshader() stages tools/nxshader into every game, plus runtime/nvn/gfx/dmsh_abi.h.
+ENGINE_FILES = ('switchrecomp.py', 'nxloader.py', 'codegen.py', 'a64.py', 'nup.py', 'nsp.py', 'zbic.py',
                 'runtime/cpu.h', 'runtime/cpu_helpers.c', 'runtime/nvn/gfx/dmsh_abi.h',
                 'tools/nxshader/nxs_live.py', 'tools/nxshader/nxs_front.py', 'tools/nxshader/nxs_cache.py',
                 'tools/nxshader/nxshader.py', 'tools/nxshader/nxs_spv.py', 'tools/nxshader/nxs_refl.py',

@@ -18,6 +18,7 @@ import zipfile
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'third_party/Switch2RECOMP/tests'))   # engine's synthetic NUP helpers
 from test_nup import minimal_nso, write_nup
+import test_nso_zbic
 spec = importlib.util.spec_from_file_location('release_package', ROOT / 'scripts/package-release.py')
 package = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(package)
@@ -149,6 +150,12 @@ def main():
             if probe.returncode not in (0, 1) or 'hactool' not in (probe.stdout + probe.stderr).lower():
                 raise RuntimeError('Bundled hactool did not start')
         run([python, '-I', '-c', 'from compression import zstd; import ctypes, ssl, multiprocessing'], temp, env)
+        # Switch 2 ZBIC-compressed NSO (Ocarina of Time): the bundled engine + Python decode it and pass its hash check
+        zbic_nso = temp / 'zbic-main.nso'
+        zbic_nso.write_bytes(test_nso_zbic.zbic_nso(test_nso_zbic.SAMPLE.read_bytes(), len(test_nso_zbic.sample())))
+        run([python, '-I', '-B', '-c', 'import sys; sys.path.insert(0, sys.argv[1]); import nxloader; '
+             'm = nxloader.load_nso(sys.argv[2]); assert len(m.image) == 3 * int(sys.argv[3])',
+             engine, zbic_nso, str(len(test_nso_zbic.sample()))], temp, env)
         sha = run([dotnet, engine / 'tools/nxshader/xlate_bin/dmsh_xlate.dll', '--source-sha'], temp, env).strip()
         if not re.fullmatch(r'[0-9a-f]{16}', sha): raise RuntimeError('Shader translator did not identify its source')
         cpp = temp / 'probe.cpp'; cpp.write_text('#include <vector>\nint main(){std::vector<int> v{42};return v[0]!=42;}\n')
@@ -193,7 +200,7 @@ def main():
              output / 'tools/nxshader'], temp, env)
         run([python, '-I', output / 'tools/nxshader/nxs_live.py', '--dump', temp / 'dump', '--cache', temp / 'cache', '--dotnet', dotnet, '--once'], temp, env)
         print('PASS: archive/file checksums, release layout + engine allowlist, contents/provenance, native feature markers, '
-              'relocated Python/zstd, GCC/G++, .NET/SPIRV, launcher self-discovery (no --root/PATH help), '
+              'relocated Python/zstd, ZBIC NSO decode, GCC/G++, .NET/SPIRV, launcher self-discovery (no --root/PATH help), '
               'Qt synthetic build/import on the bundled Python, generated-C includes, staged shader helper')
 
 
