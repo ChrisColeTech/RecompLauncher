@@ -42,6 +42,8 @@ Everything a build needs ships in the archive: Python, GCC, .NET and the shader 
 - **Cover art**: open a game's properties (the sliders button, or Alt+Enter) → **Artwork**. The selected game's
   art also fills the background.
 - **Renderer**: Vulkan by default, OpenGL as an alternative, per game in properties → **Runtime**.
+- **Controller buttons**: Settings → **Controller** chooses Nintendo positions (default; Circle = A on a
+  PlayStation pad) or Xbox labels (Cross = A); properties → **Runtime** can override it per game.
 - **Settings** (bottom right) has the theme and accent color, the default build folder and worker count.
   The **Engine ready** badge next to it tells you if a build tool is missing.
 

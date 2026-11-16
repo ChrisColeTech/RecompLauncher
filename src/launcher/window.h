@@ -36,6 +36,7 @@ public:
     void setAppearance(const QString& mode, const QString& accent);
     void selectTitle(const QString& title);
     void showAppearance();
+    void showControllerSettings();
 signals:
     void smokeFinished(bool success);
     void toolsChanged();

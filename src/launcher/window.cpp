@@ -189,9 +189,9 @@ void Window::createActions(){
     playAction=make("Play","play","Launch the selected game");connect(playAction,&QAction::triggered,this,&Window::play);
     buildAction=make("Build","build","Build the selected game using saved options (Ctrl+B)");buildAction->setShortcut(QKeySequence("Ctrl+B"));connect(buildAction,&QAction::triggered,this,&Window::startBuild);
     stopAction=make("Stop","stop","Cancel the active build or close the selected running game");connect(stopAction,&QAction::triggered,this,&Window::stop);
-    propertiesAction=make("Properties","properties","Game files, build options, renderer, and artwork (Alt+Enter)");propertiesAction->setShortcut(QKeySequence("Alt+Return"));connect(propertiesAction,&QAction::triggered,this,[this]{showProperties();});
+    propertiesAction=make("Properties","properties","Game files, build options, renderer, controller layout, and artwork (Alt+Enter)");propertiesAction->setShortcut(QKeySequence("Alt+Return"));connect(propertiesAction,&QAction::triggered,this,[this]{showProperties();});
     buildOptionsAction=new QAction("Build options…",this);connect(buildOptionsAction,&QAction::triggered,this,[this]{showProperties(1);});
-    settingsAction=make("Settings","settings","Engine paths, defaults, and appearance");connect(settingsAction,&QAction::triggered,this,[this]{showSettings();});
+    settingsAction=make("Settings","settings","Engine paths, defaults, controller layout, and appearance");connect(settingsAction,&QAction::triggered,this,[this]{showSettings();});
     installKeysAction=new QAction("Install keys…",this);connect(installKeysAction,&QAction::triggered,this,&Window::installKeys);
     folderAction=make("Open build folder","folder","Open generated game files");connect(folderAction,&QAction::triggered,this,[this]{openFolder();});
     saveFolderAction=new QAction("Open save folder",this);connect(saveFolderAction,&QAction::triggered,this,[this]{openFolder(true);});
@@ -401,6 +401,13 @@ void Window::refreshTools(){
     check->start(tools.dotnet,{"--list-runtimes"});QTimer::singleShot(10000,check,[check]{if(check->state()!=QProcess::NotRunning)check->kill();});
 }
 
+// The engine's button_layout values; the same two choices in Settings > Controller and Properties > Runtime.
+static void addButtonLayouts(QComboBox* box){
+    box->addItem("Nintendo — by position (A right, B bottom)","nintendo");box->addItem("Xbox — by label (A bottom, B right)","xbox");
+    box->setItemData(box->count()-2,"Switch positions on every pad: PlayStation Circle = A, Cross = B, Triangle = X, Square = Y",Qt::ToolTipRole);
+    box->setItemData(box->count()-1,"Printed Xbox letters: PlayStation Cross = A, Circle = B, Square = X, Triangle = Y",Qt::ToolTipRole);
+}
+static QString buttonLayoutName(const QString& layout){return layout=="xbox"?"Xbox labels":"Nintendo positions";}
 bool Window::editGame(Game& game,int tab,bool adding){
     const bool locked=running.contains(game.id)||(builder.busy()&&builder.gameId()==game.id);
     QDialog dialog(this);dialog.setWindowTitle(adding?"Add game":game.title+" — Properties");dialog.resize(670,400);
@@ -415,7 +422,9 @@ bool Window::editGame(Game& game,int tab,bool adding){
     auto* workers=new QSpinBox;workers->setRange(0,64);workers->setSpecialValueText("Use default");workers->setValue(game.workers);build->addRow("Compiler workers",workers);
     auto* optimization=new QComboBox;optimization->addItems({"O0 — no optimization","O1 — quick build","O2 — balanced (recommended)","O3 — maximum optimization"});optimization->setCurrentIndex(game.optimization);build->addRow("Optimization",optimization);
     auto* runtime=tabForm(tabs,"Runtime");auto* renderer=new QComboBox;renderer->addItem("Vulkan — native NVN","vulkan");renderer->addItem("OpenGL — compatibility","opengl");renderer->setCurrentIndex(qMax(0,renderer->findData(game.renderer)));runtime->addRow("Graphics backend",renderer);
-    auto* runtimeNote=textLabel("Vulkan needs the bundled shader tools, Python, and .NET 10.\n\nOther runtime options remain in the game's INI. Renderer changes are applied when you next play.","Muted");runtimeNote->setWordWrap(true);runtime->addRow(runtimeNote);
+    auto* buttonLayout=new QComboBox;buttonLayout->addItem("Use default — "+buttonLayoutName(library.buttonLayout),QString());addButtonLayouts(buttonLayout);
+    buttonLayout->setCurrentIndex(qMax(0,buttonLayout->findData(game.buttonLayout)));runtime->addRow("Controller layout",buttonLayout);
+    auto* runtimeNote=textLabel("Vulkan needs the bundled shader tools, Python, and .NET 10.\n\nOther runtime options remain in the game's INI. Renderer changes are applied when you next play; the controller layout is saved right away (the default is in Settings > Controller).","Muted");runtimeNote->setWordWrap(true);runtime->addRow(runtimeNote);
     auto* openIni=new QPushButton("Open game settings file");openIni->setEnabled(QFileInfo(game.iniPath()).exists());runtime->addRow("",openIni);connect(openIni,&QPushButton::clicked,&dialog,[&game]{QDesktopServices::openUrl(QUrl::fromLocalFile(game.iniPath()));});
     auto* artwork=tabForm(tabs,"Artwork");auto* cover=new QLineEdit(game.cover);auto* background=new QLineEdit(game.background);
     artwork->addRow("Cover image",browseField(cover,&dialog,"Choose cover","Images (*.png *.jpg *.jpeg *.webp *.bmp)"));
@@ -432,7 +441,7 @@ bool Window::editGame(Game& game,int tab,bool adding){
         }
         game.title=title->text().trimmed();game.source=source->text().trimmed().isEmpty()?QString{}:QFileInfo(QDir::fromNativeSeparators(source->text().trimmed())).absoluteFilePath();
         game.buildDir=QFileInfo(QDir::fromNativeSeparators(destination->text().trimmed())).absoluteFilePath();
-        if(adding)game.outputName=outputNameFor(name->text());game.workers=workers->value();game.optimization=optimization->currentIndex();game.renderer=renderer->currentData().toString();
+        if(adding)game.outputName=outputNameFor(name->text());game.workers=workers->value();game.optimization=optimization->currentIndex();game.renderer=renderer->currentData().toString();game.buttonLayout=buttonLayout->currentData().toString();
         game.cover=QDir::fromNativeSeparators(cover->text().trimmed());game.background=QDir::fromNativeSeparators(background->text().trimmed());dialog.accept();
     });
     return dialog.exec()==QDialog::Accepted;
@@ -444,11 +453,16 @@ void Window::showProperties(int tab){
             current->title=edited.title;current->source=edited.source;current->buildDir=edited.buildDir;
             current->renderer=edited.renderer;current->workers=edited.workers;current->optimization=edited.optimization;
             current->cover=edited.cover;current->background=edited.background;
+            const bool layoutChanged=current->buttonLayout!=edited.buttonLayout;current->buttonLayout=edited.buttonLayout;
+            // already-built games get the new layout in their INI now, not only at the next Play
+            QString error;if(layoutChanged&&current->hasBuild()&&!writeButtonLayout(current->iniPath(),effectiveButtonLayout(*current,library.buttonLayout),&error))
+                message("Cannot save game settings",error,true);
         }
         invalidateArtwork();save();refreshLibrary();
     }
 }
-void Window::showAppearance(){showSettings(2);}
+void Window::showAppearance(){showSettings(3);}
+void Window::showControllerSettings(){showSettings(2);}
 void Window::showSettings(int initialTab){
     QDialog dialog(this);dialog.setWindowTitle("RecompLauncher — Settings");dialog.resize(690,440);auto* layout=new QVBoxLayout(&dialog);auto* tabs=new QTabWidget;layout->addWidget(tabs,1);
     auto* toolkit=tabForm(tabs,"Engine");auto* root=new QLineEdit(library.toolRoot);toolkit->addRow("Engine folder",browseField(root,&dialog,"Choose the vendored engine folder (optional)",{},true));
@@ -459,6 +473,10 @@ void Window::showSettings(int initialTab){
     if(QFileInfo(guidePath).isFile()){auto* guide=new QPushButton("Open setup guide");toolkit->addRow("",guide);connect(guide,&QPushButton::clicked,&dialog,[guidePath]{QDesktopServices::openUrl(QUrl::fromLocalFile(guidePath));});}
     auto* builds=tabForm(tabs,"Build defaults");auto* output=new QLineEdit(library.outputRoot);output->setPlaceholderText("Empty: create builds beside the source package");builds->addRow("Build location",browseField(output,&dialog,"Choose default output folder",{},true));
     auto* workers=new QSpinBox;workers->setRange(1,64);workers->setValue(library.jobs);builds->addRow("Compiler workers",workers);
+    auto* controller=tabForm(tabs,"Controller");auto* buttonLayout=new QComboBox;addButtonLayouts(buttonLayout);
+    buttonLayout->setCurrentIndex(qMax(0,buttonLayout->findData(library.buttonLayout)));controller->addRow("Button layout",buttonLayout);
+    auto* controllerNote=textLabel("Applies to Xbox, PlayStation and other controllers. Nintendo keeps the Switch positions, so on a PlayStation pad Circle is A and Cross is B. Xbox follows the printed Xbox letters: Cross is A, Square is X.\n\nSaved into every built game that uses the default (a running game switches live). Override it per game in Properties > Runtime; single buttons can be remapped with button_map in the game's INI.","Muted");
+    controllerNote->setWordWrap(true);controller->addRow(controllerNote);
     auto* appearance=tabForm(tabs,"Appearance");
     auto* mode=new QComboBox;mode->addItem("Dark","dark");mode->addItem("Light","light");mode->setCurrentIndex(library.colorMode=="light"?1:0);appearance->addRow("Color mode",mode);
     auto* accent=new QComboBox;for(const auto& color:Theme::accents())accent->addItem(color.label,color.id);accent->setCurrentIndex(qMax(0,accent->findData(library.accentColor)));appearance->addRow("Accent color",accent);
@@ -476,8 +494,14 @@ void Window::showSettings(int initialTab){
         if(selectedRoot!=library.toolRoot&&!QFileInfo(QDir(selectedRoot).filePath("switchrecomp.py")).isFile()){QMessageBox::warning(&dialog,"Engine not found","Select the vendored engine folder (the one containing switchrecomp.py).");return;}
         library.toolRoot=selectedRoot.isEmpty()?QString{}:QFileInfo(selectedRoot).absoluteFilePath();library.outputRoot=QDir::fromNativeSeparators(output->text().trimmed());library.jobs=workers->value();library.showBackground=backdrop->isChecked();
         library.colorMode=mode->currentData().toString();library.accentColor=accent->currentData().toString();
+        const QString layout=buttonLayout->currentData().toString();
+        if(layout!=library.buttonLayout){
+            library.buttonLayout=layout;int failed=0;QString error;
+            for(const auto& g:library.games)if(g.buttonLayout.isEmpty()&&g.hasBuild()&&!writeButtonLayout(g.iniPath(),layout,&error))failed++;
+            if(failed)message("Cannot save game settings",QString("The controller layout could not be written to %1 game(s): %2\nIt is written again when you play.").arg(failed).arg(error),true);
+        }
         backgroundAction->setChecked(library.showBackground);save();refreshTools();refreshSelection();dialog.accept();
-    });tabs->setCurrentIndex(qBound(0,initialTab,2));dialog.exec();setAppearance(library.colorMode,library.accentColor);
+    });tabs->setCurrentIndex(qBound(0,initialTab,3));dialog.exec();setAppearance(library.colorMode,library.accentColor);
 }
 
 bool Window::importSource(const QString& source,bool interactive,const QString& output){
@@ -495,7 +519,8 @@ bool Window::importBuild(const QString& executable){
 }
 void Window::startBuild(){
     auto* game=selected();if(!game||demo||running.contains(game->id))return;
-    QString error;if(!builder.start(*game,tools,library.jobs,&error)){emit smokeFinished(false);message("Cannot start build",error,true);return;}
+    Game build=*game;build.buttonLayout=effectiveButtonLayout(*game,library.buttonLayout);
+    QString error;if(!builder.start(build,tools,library.jobs,&error)){emit smokeFinished(false);message("Cannot start build",error,true);return;}
     game->buildIncomplete=true;save();console->clear();console->appendPlainText("Source: "+displayPath(game->source)+"\nOutput: "+displayPath(game->buildDir)+"\n");
     buildDock->setWindowTitle("Build output — "+game->title);showBuildOutput();refreshLibrary();
 }
@@ -508,7 +533,7 @@ void Window::play(){
     if(game->renderer=="vulkan"&&!QFileInfo(QDir(game->buildDir).filePath("tools/nxshader/nxs_live.py")).exists()){
         message("Shader tools are missing","Rebuild this game with the current engine to stage its Vulkan shader tools before playing.",true);return;
     }
-    QString error;if(!writeRenderer(game->iniPath(),game->renderer,&error)){message("Cannot save game settings",error,true);return;}
+    QString error;if(!writeGameSettings(*game,library.buttonLayout,&error)){message("Cannot save game settings",error,true);return;}
     QProcess process;process.setProgram(game->executable());process.setWorkingDirectory(game->buildDir);auto env=tools.environment();
     process.setProcessEnvironment(env);qint64 pid=0;if(!process.startDetached(&pid)){message("Could not launch",process.errorString(),true);return;}
     running[game->id]=pid;game->lastPlayed=QDateTime::currentDateTime();save();refreshLibrary();jobLabel->setText("Game launched");

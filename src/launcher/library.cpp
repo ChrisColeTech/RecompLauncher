@@ -89,7 +89,7 @@ bool Game::hasBuild() const {
 bool Game::sourceAvailable() const { return !source.isEmpty() && QFileInfo::exists(source); }
 QJsonObject Game::json() const {
     return {{"id", id}, {"title", title}, {"source", source}, {"buildDir", buildDir},
-        {"outputName", outputName}, {"cover", cover}, {"background", background}, {"renderer", renderer},
+        {"outputName", outputName}, {"cover", cover}, {"background", background}, {"renderer", renderer}, {"buttonLayout", buttonLayout},
         {"workers", workers}, {"optimization", optimization},
         {"builtSource", builtSource}, {"buildIncomplete", buildIncomplete}, {"lastPlayed", lastPlayed.toString(Qt::ISODate)},
         {"lastBuilt", lastBuilt.toString(Qt::ISODate)}};
@@ -103,6 +103,8 @@ Game Game::fromJson(const QJsonObject& o) {
     g.workers = qBound(0, o["workers"].toInt(), 64);
     g.optimization = qBound(0, o["optimization"].toInt(2), 3);
     if (g.renderer != "vulkan" && g.renderer != "opengl") g.renderer = "opengl";
+    g.buttonLayout = o["buttonLayout"].toString();
+    if (!validButtonLayout(g.buttonLayout)) g.buttonLayout.clear();
     g.builtSource = o["builtSource"].toString();
     g.buildIncomplete = o["buildIncomplete"].toBool();
     g.lastPlayed = QDateTime::fromString(o["lastPlayed"].toString(), Qt::ISODate);
@@ -212,6 +214,8 @@ bool Library::load(QString* error) {
     colorMode = o["colorMode"].toString("dark");
     if(colorMode!="light"&&colorMode!="dark")colorMode="dark";
     accentColor = o["accentColor"].toString("lime");
+    buttonLayout = o["buttonLayout"].toString("nintendo");
+    if (buttonLayout != "nintendo" && buttonLayout != "xbox") buttonLayout = "nintendo";
     geometry = QByteArray::fromBase64(o["geometry"].toString().toLatin1());
     dockState = QByteArray::fromBase64(o["dockState"].toString().toLatin1());
     games.clear();
@@ -228,7 +232,7 @@ bool Library::save(QString* error) const {
     for (const auto& g : games) entries.append(g.json());
     QJsonObject o{{"schema", 1}, {"games", entries}, {"toolRoot", toolRoot}, {"outputRoot", outputRoot}, {"keysPath", keysPath}, {"jobs", jobs},
         {"viewMode", viewMode}, {"coverWidth", coverWidth}, {"showBackground", showBackground},
-        {"colorMode", colorMode}, {"accentColor", accentColor},
+        {"colorMode", colorMode}, {"accentColor", accentColor}, {"buttonLayout", buttonLayout},
         {"geometry", QString::fromLatin1(geometry.toBase64())}, {"dockState", QString::fromLatin1(dockState.toBase64())}};
     QSaveFile file(path);
     if (!file.open(QIODevice::WriteOnly)) return fail(error, file.errorString());
@@ -346,8 +350,8 @@ QString readRenderer(const QString& ini) {
     }
     return renderer;
 }
-bool writeRenderer(const QString& ini, const QString& renderer, QString* error) {
-    if (renderer != "vulkan" && renderer != "opengl") return fail(error, "Unknown renderer.");
+// Sets key=value in the INI, keeping every other line, comment and line ending; adds it under [section] if missing.
+static bool writeIniKey(const QString& ini, const QString& section, const QString& keyName, const QString& value, QString* error) {
     QFile input(ini);
     QString text;
     if (input.exists()) {
@@ -357,22 +361,40 @@ bool writeRenderer(const QString& ini, const QString& renderer, QString* error) 
     const QString newline = text.contains("\r\n") ? "\r\n" : "\n";
     text.replace("\r\n", "\n");
     auto lines = text.split('\n');
-    const QRegularExpression key("^\\s*renderer\\s*=");
+    const QRegularExpression key("^\\s*" + QRegularExpression::escape(keyName) + "\\s*=");
+    const QString line = keyName + "=" + value, header = "[" + section + "]";
     bool found = false;
-    int section = -1;
+    int at = -1;
     for (int i = 0; i < lines.size(); ++i) {
-        if (lines[i].trimmed() == "[Graphics]") section = i;
-        if (key.match(lines[i]).hasMatch()) { lines[i] = "renderer=" + renderer; found = true; }
+        if (lines[i].trimmed() == header) at = i;
+        if (key.match(lines[i]).hasMatch()) { lines[i] = line; found = true; }
     }
     if (!found) {
-        if (section >= 0) lines.insert(section + 1, "renderer=" + renderer);
-        else { lines << "[Graphics]" << "renderer=" + renderer << ""; }
+        if (at >= 0) lines.insert(at + 1, line);
+        else { lines << header << line << ""; }
     }
     QSaveFile output(ini);
     if (!output.open(QIODevice::WriteOnly)) return fail(error, output.errorString());
     const auto bytes = lines.join(newline).toUtf8();
     if (output.write(bytes) != bytes.size() || !output.commit()) return fail(error, output.errorString());
     return true;
+}
+bool writeRenderer(const QString& ini, const QString& renderer, QString* error) {
+    if (renderer != "vulkan" && renderer != "opengl") return fail(error, "Unknown renderer.");
+    return writeIniKey(ini, "Graphics", "renderer", renderer, error);
+}
+bool validButtonLayout(const QString& layout) { return layout.isEmpty() || layout == "nintendo" || layout == "xbox"; }
+QString effectiveButtonLayout(const Game& game, const QString& launcherDefault) {
+    if (game.buttonLayout == "nintendo" || game.buttonLayout == "xbox") return game.buttonLayout;
+    return launcherDefault == "xbox" ? "xbox" : "nintendo";
+}
+bool writeButtonLayout(const QString& ini, const QString& layout, QString* error) {
+    if (layout != "nintendo" && layout != "xbox") return fail(error, "Unknown controller layout.");
+    return writeIniKey(ini, "Controls", "button_layout", layout, error);
+}
+bool writeGameSettings(const Game& game, const QString& launcherLayout, QString* error) {
+    return writeRenderer(game.iniPath(), game.renderer, error)
+        && writeButtonLayout(game.iniPath(), effectiveButtonLayout(game, launcherLayout), error);
 }
 
 bool LibraryFilter::matches(const Game& game, bool running, bool building) const {

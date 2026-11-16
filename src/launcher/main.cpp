@@ -54,6 +54,8 @@ int main(int argc, char** argv) {
     parser.addOption({"select-title", "Select a library game by display title", "title"});
     parser.addOption({"check-image", "Validate an artwork image using deployed Qt plugins", "file"});
     parser.addOption({"show-appearance", "Open appearance settings"});
+    parser.addOption({"show-controller", "Open controller settings"});
+    parser.addOption({"properties-tab", "Tab for --show-properties (0 General, 1 Build, 2 Runtime, 3 Artwork)", "index"});
     parser.addOption({"screenshot", "Save a launcher preview and exit", "png"});
     parser.addOption({"smoke-build", "Build a synthetic test input and exit (diagnostics)", "input"});
     parser.addOption({"build-output", "Output folder for --smoke-build", "directory"});
@@ -69,9 +71,10 @@ int main(int argc, char** argv) {
     if(parser.isSet("preview-theme")||parser.isSet("preview-accent"))window.setAppearance(parser.value("preview-theme").isEmpty()?"dark":parser.value("preview-theme"),parser.value("preview-accent").isEmpty()?"lime":parser.value("preview-accent"));
     if(parser.isSet("list-view")) window.setViewMode(1);
     if(parser.isSet("show-console")) window.showBuildOutput();
-    if(parser.isSet("show-properties")) QTimer::singleShot(0,&window,[&window]{window.showProperties();});
+    if(parser.isSet("show-properties")) QTimer::singleShot(0,&window,[&window,tab=parser.value("properties-tab").toInt()]{window.showProperties(tab);});
     if(parser.isSet("show-filters")) QTimer::singleShot(0,&window,[&window]{window.showFilters();});
     if(parser.isSet("show-appearance")) QTimer::singleShot(0,&window,[&window]{window.showAppearance();});
+    if(parser.isSet("show-controller")) QTimer::singleShot(0,&window,[&window]{window.showControllerSettings();});
     if(parser.isSet("smoke-build")) {
         QObject::connect(&window,&Window::smokeFinished,&app,[](bool okay){QApplication::exit(okay?0:1);});
         QTimer::singleShot(0,&window,[&] {

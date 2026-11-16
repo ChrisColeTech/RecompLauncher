@@ -22,6 +22,7 @@ inline constexpr auto nativeBackend = "x11";
 struct Game {
     QString id, title, source, buildDir, outputName, cover, background;
     QString renderer = "vulkan";
+    QString buttonLayout; // Empty inherits the launcher default (Settings > Controller).
     QString builtSource;
     bool buildIncomplete = false;
     int workers = 0; // Zero inherits the launcher default.
@@ -63,6 +64,7 @@ public:
     int viewMode = 0, coverWidth = 180;
     bool showBackground = true;
     QString colorMode = "dark", accentColor = "lime";
+    QString buttonLayout = "nintendo"; // Default controller layout written into every game's INI.
     QByteArray geometry, dockState;
     QVector<Game> games;
 private:
@@ -75,6 +77,12 @@ bool validSource(const QString& source, QString* error);
 Game gameFromSource(const QString& source, const QString& outputRoot = {});
 bool gameFromExecutable(const QString& path, Game* game, QString* error);
 bool writeRenderer(const QString& ini, const QString& renderer, QString* error);
+// The engine's button_layout key: "nintendo" (by position, the engine default) or "xbox" (by Xbox label).
+bool validButtonLayout(const QString& layout);
+QString effectiveButtonLayout(const Game& game, const QString& launcherDefault);
+bool writeButtonLayout(const QString& ini, const QString& layout, QString* error);
+// Everything the launcher owns in a game's INI (renderer + button layout), written at build, play and settings change.
+bool writeGameSettings(const Game& game, const QString& launcherLayout, QString* error);
 QString readRenderer(const QString& ini);
 bool samePath(const QString& left, const QString& right);
 bool inPlacePackage(const QString& path);

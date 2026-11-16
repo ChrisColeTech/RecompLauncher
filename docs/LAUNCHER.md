@@ -109,6 +109,13 @@ on the next launch without discarding other settings. Vulkan needs a runtime bui
 tools, Python, and .NET 10. The launcher checks the latter tools and reports missing setup instead of silently
 launching a Vulkan game with no shader translator.
 
+**Settings → Controller** sets the default controller button layout, the engine's `button_layout` INI key:
+**Nintendo** (by position like the Switch: right = A, bottom = B; on a PlayStation pad Circle = A, Cross = B) or
+**Xbox** (by the printed Xbox letters: Cross = A, Square = X). **Properties → Runtime → Controller layout** overrides
+it per game ("Use default" inherits). The launcher writes the effective value into the game INI after a build, on
+every Play, and right away when either setting changes for an already-built game (a running game applies it live).
+Per-button remapping (`button_map`) stays INI-only; see the engine's docs/CONTROLLERS_WIN32.md.
+
 The frontend uses the toolkit's prebuilt runtime and calls the CLI entry `src/recomp_cli.py` (which imports the
 vendored engine) through `QProcess` with an argument list. Spaces, brackets, and shell metacharacters in paths are
 not passed through a shell. Game processes are

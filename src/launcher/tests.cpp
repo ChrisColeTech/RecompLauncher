@@ -128,11 +128,34 @@ private slots:
         QVERIFY(text.contains("renderer=vulkan\r\n")); QVERIFY(text.contains("resolution=0.75"));
         QVERIFY(text.contains("; keep this comment")); QVERIFY(text.contains("audio_slowdown=0"));
     }
+    void buttonLayoutIni() {
+        QTemporaryDir tmp; const QString path=tmp.filePath("Game.ini");
+        // the runtime's own INI: [Controls] already has the key (it writes every key with its default)
+        const QByteArray original="; keep\r\n[Controls]\r\n; help text\r\nbutton_layout=nintendo\r\nbutton_map=south:a\r\n[Graphics]\r\nrenderer=opengl\r\n";
+        {QFile f(path); QVERIFY(f.open(QIODevice::WriteOnly)); f.write(original);}
+        QString error; QVERIFY2(writeButtonLayout(path,"xbox",&error),qPrintable(error));
+        auto read=[&path]{QFile f(path); return f.open(QIODevice::ReadOnly)?f.readAll():QByteArray();};
+        QByteArray expected=original; expected.replace("button_layout=nintendo","button_layout=xbox"); QCOMPARE(read(),expected);
+        QVERIFY(!writeButtonLayout(path,"sega",&error)); QVERIFY(!writeButtonLayout(path,"",&error)); QCOMPARE(read(),expected);
+        // an older INI without the key: added under [Controls], or a new [Controls] section
+        {QFile f(path); QVERIFY(f.open(QIODevice::WriteOnly|QIODevice::Truncate)); f.write("[Controls]\nmouse_invert=0\n");}
+        QVERIFY(writeButtonLayout(path,"nintendo",&error)); QCOMPARE(read(),QByteArray("[Controls]\nbutton_layout=nintendo\nmouse_invert=0\n"));
+        QVERIFY(QFile::remove(path)); QVERIFY(writeButtonLayout(path,"xbox",&error)); QVERIFY(read().contains("[Controls]\nbutton_layout=xbox\n"));
+        // inherit vs override, and the full set the launcher writes at build/play time
+        Game game; game.buildDir=tmp.path(); game.outputName="Game"; game.renderer="vulkan";
+        QCOMPARE(effectiveButtonLayout(game,"xbox"),QString("xbox")); QCOMPARE(effectiveButtonLayout(game,"nintendo"),QString("nintendo"));
+        QCOMPARE(effectiveButtonLayout(game,"bogus"),QString("nintendo"));
+        game.buttonLayout="nintendo"; QCOMPARE(effectiveButtonLayout(game,"xbox"),QString("nintendo"));
+        QVERIFY(QFile::remove(path)); QVERIFY2(writeGameSettings(game,"xbox",&error),qPrintable(error));
+        QVERIFY(read().contains("renderer=vulkan")); QVERIFY(read().contains("button_layout=nintendo"));
+        game.buttonLayout.clear(); QVERIFY(writeGameSettings(game,"xbox",&error)); QVERIFY(read().contains("button_layout=xbox")); QVERIFY(!read().contains("button_layout=nintendo"));
+        QVERIFY(validButtonLayout("") && validButtonLayout("xbox") && !validButtonLayout("label"));
+    }
     void libraryRoundTripAndCorruption() {
         QTemporaryDir tmp; const QString file=tmp.filePath("nested/library.json");
         Library lib(file); Game game=gameFromSource(tmp.filePath("My Game [v1].nup"));
-        game.cover="art.png"; game.background="wallpaper.png"; game.renderer="vulkan"; game.workers=3; game.optimization=1;
-        lib.add(game); lib.jobs=4; lib.viewMode=1; lib.coverWidth=220; lib.showBackground=false;lib.colorMode="light";lib.accentColor="violet";lib.keysPath="D:/Keys/prod.keys";
+        game.cover="art.png"; game.background="wallpaper.png"; game.renderer="vulkan"; game.workers=3; game.optimization=1; game.buttonLayout="nintendo";
+        lib.add(game); lib.buttonLayout="xbox"; lib.jobs=4; lib.viewMode=1; lib.coverWidth=220; lib.showBackground=false;lib.colorMode="light";lib.accentColor="violet";lib.keysPath="D:/Keys/prod.keys";
         QString error; QVERIFY2(lib.save(&error),qPrintable(error));
         Library loaded(file); QVERIFY(loaded.load(&error)); QCOMPARE(loaded.games.size(),1); QCOMPARE(loaded.jobs,4);
         QCOMPARE(loaded.games.front().source,game.source); QCOMPARE(loaded.games.front().title,QString("My Game"));
@@ -140,6 +163,10 @@ private slots:
         QCOMPARE(loaded.viewMode,1); QCOMPARE(loaded.coverWidth,220); QVERIFY(!loaded.showBackground);
         QCOMPARE(loaded.colorMode,QString("light"));QCOMPARE(loaded.accentColor,QString("violet"));
         QCOMPARE(loaded.keysPath,QString("D:/Keys/prod.keys"));
+        QCOMPARE(loaded.buttonLayout,QString("xbox")); QCOMPARE(loaded.games.front().buttonLayout,QString("nintendo"));
+        // a new library defaults to the engine default; games without the key inherit; unknown values never reach an INI
+        QCOMPARE(Library(file).buttonLayout,QString("nintendo")); QVERIFY(Game::fromJson({{"buttonLayout","sega"}}).buttonLayout.isEmpty());
+        QVERIFY(Game::fromJson({}).buttonLayout.isEmpty());
         QVERIFY(!loaded.add(game));
         {QFile f(file); QVERIFY(f.open(QIODevice::WriteOnly|QIODevice::Truncate)); f.write("bad json");}
         Library broken(file); QVERIFY(!broken.load(&error)); QVERIFY(!broken.save(&error));
