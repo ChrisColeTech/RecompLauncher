@@ -125,10 +125,10 @@ jobs:
         run: python scripts/package-release.py --deps build/release-deps --launcher bin/launcher-linux --qt "$QT_ROOT_DIR"
       - name: Test relocated Windows archive
         if: runner.os == 'Windows'
-        run: python scripts/smoke-release.py dist/Switch2RECOMP-turbo-windows-x64.zip
+        run: python scripts/smoke-release.py dist/RecompLauncher-windows-x64.zip
       - name: Test relocated Linux archive
         if: runner.os == 'Linux'
-        run: python scripts/smoke-release.py dist/Switch2RECOMP-turbo-linux-x64.tar.gz
+        run: python scripts/smoke-release.py dist/RecompLauncher-linux-x64.tar.gz
       - uses: actions/upload-artifact@v4
         with:
           name: portable-${{ matrix.platform }}
@@ -170,8 +170,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          tag="turbo-${GITHUB_RUN_NUMBER}-${GITHUB_RUN_ATTEMPT}"
-          prefix=Switch2RECOMP-turbo-source
+          tag="launcher-${GITHUB_RUN_NUMBER}-${GITHUB_RUN_ATTEMPT}"
+          prefix=RecompLauncher-source
           # git archive leaves submodules out; append the pinned engine so the source archive is complete (AGPL)
           git archive --format=tar --prefix="$prefix/" -o release/source.tar "$GITHUB_SHA"
           git -C "$ENGINE" archive --format=tar --prefix="$prefix/$ENGINE/" -o "$PWD/release/engine.tar" HEAD
@@ -179,4 +179,4 @@ jobs:
           gzip -n -c release/source.tar > "release/$prefix.tar.gz"
           rm release/source.tar release/engine.tar
           (cd release && sha256sum "$prefix.tar.gz" > "$prefix.tar.gz.sha256")
-          gh release create "$tag" release/*.zip release/*.tar.gz release/*.sha256 --target "$GITHUB_SHA" --title "Switch2RECOMP turbo build ${GITHUB_RUN_NUMBER}" --notes-file docs/RELEASE_NOTES.md --latest
+          gh release create "$tag" release/*.zip release/*.tar.gz release/*.sha256 --target "$GITHUB_SHA" --title "RecompLauncher build ${GITHUB_RUN_NUMBER}" --notes-file docs/RELEASE_NOTES.md --latest

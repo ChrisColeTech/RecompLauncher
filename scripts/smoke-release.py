@@ -142,7 +142,7 @@ def main():
         source = temp / 'Synthetic [v0] & input.nup'
         write_nup(source, {'Data/raw.bin': b'release fixture'}, {'main': minimal_nso()})
         output = temp / 'Build output'; library = temp / 'library.json'
-        launcher = root / ('bin/launcher/SwitchRecompLauncher.exe' if win else 'Switch2RECOMP-turbo.sh')
+        launcher = root / ('bin/launcher/SwitchRecompLauncher.exe' if win else package.NAME + '.sh')
         options = ['--root', engine] if win else []   # the Linux wrapper passes --root itself
         run([launcher, *options, '--library', library, '--smoke-build', source, '--build-output', output], temp, env)
         game, = json.loads(library.read_text())['games']

@@ -10,8 +10,8 @@ SDL2, and the shared libraries discovered during packaging.
 The bundle mirrors this repository, so the launcher finds everything the same way it does in a checkout:
 
 ```text
-Switch2RECOMP-turbo-<platform>-x64/
-  Switch2RECOMP-turbo.cmd | .sh   starts bin/launcher with --root third_party/Switch2RECOMP
+RecompLauncher-<platform>-x64/
+  RecompLauncher.cmd | .sh        starts bin/launcher with --root third_party/Switch2RECOMP
   bin/launcher/                   Qt launcher and its Qt/MSVC runtime files
   src/recomp_cli.py               build entry point the launcher runs
   scripts/ docs/ tests/           launcher helpers and documentation
@@ -26,8 +26,8 @@ Switch2RECOMP-turbo-<platform>-x64/
 ## Run a release
 
 - Windows x64: extract the entire ZIP into a writable folder, then open
-  `Switch2RECOMP-turbo.cmd`.
-- Linux x64: extract the tar.gz, then run `./Switch2RECOMP-turbo.sh`.
+  `RecompLauncher.cmd`.
+- Linux x64: extract the tar.gz, then run `./RecompLauncher.sh`.
   The release baseline is Ubuntu 24.04 (glibc 2.39) or a compatible newer desktop.
   An X11 session or XWayland is required. Extract onto a filesystem that supports
   Unix permissions and symbolic links.
@@ -73,7 +73,7 @@ on Windows. The clean workflow builds the OpenGL/NVN desktop runtime, its audio 
 Optional Eden, OpenH264, Opus, and SPIRV-Cross/LSFG static libraries are not built by this workflow.
 
 Both jobs must pass before publishing. Pushes to `main` and manual all-platform runs on `main`
-create a release tagged `turbo-<run number>-<attempt>`, targeting the exact tested commit.
+create a release tagged `launcher-<run number>-<attempt>`, targeting the exact tested commit.
 PRs and manual runs on other branches only upload workflow artifacts. Each release has a Windows ZIP,
 Linux tar.gz, archive checksums, and a source archive of the launcher with the pinned engine included,
 each with its own checksum. `build-info.json` records the launcher commit, the engine commit and its
@@ -110,7 +110,7 @@ python third_party/Switch2RECOMP/tools/build_nvn.py --jobs 8
 python src/recomp_cli.py --build-runtime --target win64 --backend win32 --cc "$pwd\build\release-deps\gcc\Library\bin\x86_64-w64-mingw32-gcc.exe"
 ./scripts/build-launcher.ps1 -QtPrefix C:/Qt/6.8.3/msvc2022_64
 python scripts/package-release.py --deps build/release-deps --launcher bin/launcher --qt C:/Qt/6.8.3/msvc2022_64
-python scripts/smoke-release.py dist/Switch2RECOMP-turbo-windows-x64.zip
+python scripts/smoke-release.py dist/RecompLauncher-windows-x64.zip
 ```
 
 Linux:
@@ -121,7 +121,7 @@ python3 third_party/Switch2RECOMP/tools/build_nvn.py --linux --jobs 8
 python3 src/recomp_cli.py --build-runtime --target linux --backend x11 --cc gcc
 sh scripts/build-launcher.sh
 python3 scripts/package-release.py --deps build/release-deps --launcher bin/launcher-linux --qt "$SWR_QT_PREFIX"
-python3 scripts/smoke-release.py dist/Switch2RECOMP-turbo-linux-x64.tar.gz
+python3 scripts/smoke-release.py dist/RecompLauncher-linux-x64.tar.gz
 ```
 
 Packaging refuses to merge into an existing staging directory. Use another `--output`

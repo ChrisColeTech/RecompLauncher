@@ -18,6 +18,7 @@ import tarfile
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
+NAME = 'RecompLauncher'   # archive, top-level folder and start-script name
 ENGINE_DIR = Path('third_party/Switch2RECOMP')   # same relative path in the checkout and in the bundle
 ENGINE = ROOT / ENGINE_DIR
 LAUNCHER_DIRS = {'src', 'scripts', 'docs', 'tests', '.github'}
@@ -67,7 +68,7 @@ def required_files(platform):
     common += ['sources/' + module + '-everywhere-src-6.8.3.tar.xz' for module in ('qtbase', 'qtimageformats', 'qtsvg')]
     if platform == 'windows':
         engine += ['tools/hactool/hactool.exe', 'tools/hactool/LICENSE']
-        common += ['Switch2RECOMP-turbo.cmd', 'python/python.exe', 'python/LICENSE.txt',
+        common += [NAME + '.cmd', 'python/python.exe', 'python/LICENSE.txt',
                    'gcc/Library/bin/x86_64-w64-mingw32-gcc.exe', 'dotnet/dotnet.exe', 'scripts/_python.bat',
                    'bin/launcher/SwitchRecompLauncher.exe', 'bin/launcher/Qt6Core.dll',
                    'bin/launcher/Qt6Gui.dll', 'bin/launcher/Qt6Widgets.dll',
@@ -76,7 +77,7 @@ def required_files(platform):
                    'bin/launcher/vcruntime140.dll', 'bin/launcher/vcruntime140_1.dll'] + [
                    'shader-tools/Library/bin/' + tool + '.exe' for tool in ('spirv-as', 'spirv-val', 'spirv-opt')]
     else:
-        common += ['Switch2RECOMP-turbo.sh', 'fix-gcc.sh', 'python/bin/python3', 'dotnet/dotnet', 'scripts/_env.sh',
+        common += [NAME + '.sh', 'fix-gcc.sh', 'python/bin/python3', 'dotnet/dotnet', 'scripts/_env.sh',
                    'gcc/bin/x86_64-conda-linux-gnu-gcc',
                    'bin/launcher/SwitchRecompLauncher', 'bin/launcher/plugins/platforms/libqxcb.so',
                    'bin/launcher/plugins/platforms/libqoffscreen.so', 'bin/launcher/plugins/imageformats/libqwebp.so',
@@ -270,7 +271,7 @@ def main():
     ap.add_argument('--qt', type=Path, required=True)
     ap.add_argument('--output', type=Path, default=ROOT / 'dist')
     ap.add_argument('--work', type=Path, help='Optional staging directory on a faster filesystem')
-    ap.add_argument('--name', default='Switch2RECOMP-turbo')
+    ap.add_argument('--name', default=NAME)
     ap.add_argument('--stage-only', action='store_true')
     args = ap.parse_args()
     if not re.fullmatch(r'[A-Za-z0-9._-]+', args.name): ap.error('Invalid archive name')
@@ -292,12 +293,12 @@ def main():
     tree(args.deps / 'licenses', stage / 'licenses')
     tree(args.deps / 'sources', stage / 'sources')
     if platform == 'windows':
-        (stage / 'Switch2RECOMP-turbo.cmd').write_text('@echo off\n"%~dp0bin\\launcher\\SwitchRecompLauncher.exe" --root "%~dp0third_party\\Switch2RECOMP" %*\n', newline='\r\n')
+        (stage / (NAME + '.cmd')).write_text('@echo off\n"%~dp0bin\\launcher\\SwitchRecompLauncher.exe" --root "%~dp0third_party\\Switch2RECOMP" %*\n', newline='\r\n')
     else:
         tree(args.deps / 'lib', stage / 'lib')
         linux_libraries(stage, args.qt)
         (stage / 'bin/launcher/qt.conf').write_text('[Paths]\nPlugins=plugins\n')
-        wrapper = stage / 'Switch2RECOMP-turbo.sh'
+        wrapper = stage / (NAME + '.sh')
         wrapper.write_text('#!/bin/sh\nset -eu\nroot=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)\n'
                            'if [ -x "$root/fix-gcc.sh" ]; then "$root/fix-gcc.sh"; fi\n'
                            'export LD_LIBRARY_PATH="$root/lib:$root/gcc/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"\n'

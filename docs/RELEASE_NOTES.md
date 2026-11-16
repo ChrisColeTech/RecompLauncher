@@ -1,8 +1,8 @@
 Portable Windows x64 and Linux x64 bundles of the SwitchRecomp Launcher with the
 Switch2RECOMP-turbo engine, based on SwitchRecomp by MZ Labs.
 
-Extract the complete archive and run `Switch2RECOMP-turbo.cmd` on Windows or
-`./Switch2RECOMP-turbo.sh` on Linux. The bundle includes Python, GCC/G++, .NET,
+Extract the complete archive and run `RecompLauncher.cmd` on Windows or
+`./RecompLauncher.sh` on Linux. The bundle includes Python, GCC/G++, .NET,
 Qt, the native runtime, and shader tools. No separate developer-tool installation
 is required. Linux requires an Ubuntu 24.04-compatible desktop with X11/XWayland;
 both platforms require a compatible GPU driver and AVX2-capable x64 CPU.
