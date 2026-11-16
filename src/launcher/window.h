@@ -10,6 +10,8 @@ class LibraryCanvas;
 class GameCard;
 class FilterPopup;
 class QFrame;
+class QMenuBar;
+class TitleBar;
 class QAction;
 class QComboBox;
 class QDockWidget;
@@ -45,6 +47,7 @@ protected:
     void dropEvent(QDropEvent*) override;
     void closeEvent(QCloseEvent*) override;
     bool eventFilter(QObject*, QEvent*) override;
+    bool nativeEvent(const QByteArray& eventType, void* message, qintptr* result) override;
 private:
     void createActions();
     void createMenusAndToolbar();
@@ -79,6 +82,8 @@ private:
     bool demo = false, closing = false, dotnetReady = false;
     int toolsGeneration = 0;
     QMap<QString, qint64> running;
+    TitleBar* titleBar = nullptr;
+    QMenuBar* menus = nullptr;
     LibraryCanvas* canvas = nullptr;
     QMap<QString,GameCard*> cards;
     QStackedWidget* views = nullptr;

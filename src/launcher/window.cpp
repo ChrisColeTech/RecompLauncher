@@ -4,6 +4,7 @@
 #include "artwork.h"
 #include "filterpopup.h"
 #include "theme.h"
+#include "titlebar.h"
 #include "processwatch.h"
 #include <QActionGroup>
 #include <QApplication>
@@ -209,15 +210,18 @@ void Window::createActions(){
 }
 
 void Window::createMenusAndToolbar(){
-    auto* file=menuBar()->addMenu("&File");file->addAction(addAction);file->addAction(addFolderAction);file->addAction(importAction);
+    // The menus share the client-drawn title bar row (VS Code-style); QMainWindow::menuBar() must not be called,
+    // it would replace the title bar with a new QMenuBar.
+    titleBar=new TitleBar(this);menus=titleBar->menuBar();setMenuWidget(titleBar);
+    auto* file=menus->addMenu("&File");file->addAction(addAction);file->addAction(addFolderAction);file->addAction(importAction);
     file->addSeparator();file->addAction(settingsAction);
     file->addSeparator();file->addAction("Exit",QKeySequence("Alt+F4"),this,&QWidget::close);
-    auto* game=menuBar()->addMenu("&Game");game->addAction(playAction);game->addAction(stopAction);game->addAction(buildAction);game->addSeparator();game->addAction(removeAction);
-    auto* keys=menuBar()->addMenu("&Keys");keys->addAction(installKeysAction);keys->addAction("Open keys folder",this,[this]{const auto path=QFileInfo(library.keysPath).absolutePath();if(QDir(path).exists())QDesktopServices::openUrl(QUrl::fromLocalFile(path));});
-    auto* view=menuBar()->addMenu("&View");view->setObjectName("ViewMenu");view->addAction(galleryAction);view->addAction(tableAction);view->addSeparator();view->addAction(filterAction);view->addAction(backgroundAction);
+    auto* game=menus->addMenu("&Game");game->addAction(playAction);game->addAction(stopAction);game->addAction(buildAction);game->addSeparator();game->addAction(removeAction);
+    auto* keys=menus->addMenu("&Keys");keys->addAction(installKeysAction);keys->addAction("Open keys folder",this,[this]{const auto path=QFileInfo(library.keysPath).absolutePath();if(QDir(path).exists())QDesktopServices::openUrl(QUrl::fromLocalFile(path));});
+    auto* view=menus->addMenu("&View");view->setObjectName("ViewMenu");view->addAction(galleryAction);view->addAction(tableAction);view->addSeparator();view->addAction(filterAction);view->addAction(backgroundAction);
     view->addAction("Refresh library",QKeySequence("F5"),this,[this]{invalidateArtwork();refreshTools();refreshLibrary();});
     view->addSeparator();view->addAction("View console",QKeySequence("Ctrl+L"),this,&Window::showBuildOutput);
-    auto* help=menuBar()->addMenu("&Help");help->addAction("About RecompLauncher",this,[this]{message("RecompLauncher","Build and launch your own game dumps from one library.\nNo games, keys, or firmware are included.\n\nEngine: Switch2RECOMP (AGPL-3.0) — see legal/LICENSE.txt in the release (third_party/Switch2RECOMP/LICENSE.txt in a source checkout).\n\nNative controller input is supported. Vibration and some Switch 2 audio/video features remain incomplete.");});
+    auto* help=menus->addMenu("&Help");help->addAction("About RecompLauncher",this,[this]{message("RecompLauncher","Build and launch your own game dumps from one library.\nNo games, keys, or firmware are included.\n\nEngine: Switch2RECOMP (AGPL-3.0) — see legal/LICENSE.txt in the release (third_party/Switch2RECOMP/LICENSE.txt in a source checkout).\n\nNative controller input is supported. Vibration and some Switch 2 audio/video features remain incomplete.");});
 
     auto* bar=addToolBar("Commands");bar->setObjectName("Commands");bar->setMovable(false);bar->setIconSize({32,32});bar->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
     auto* addButton=new QToolButton;addButton->setObjectName("AddGameButton");addButton->setDefaultAction(addAction);addButton->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);addButton->setIconSize({32,32});
@@ -275,7 +279,7 @@ void Window::createBuildDock(){
     toolsBar->addAction("Clear view",this,[this]{console->clear();});layout->addWidget(toolsBar);
     console=new QPlainTextEdit;console->setReadOnly(true);console->setMaximumBlockCount(12000);console->setPlaceholderText("Build output appears here. Select a game and choose Build to begin.");layout->addWidget(console,1);
     buildDock->setWidget(page);addDockWidget(Qt::BottomDockWidgetArea,buildDock);buildDock->hide();
-    if(auto* view=menuBar()->findChild<QMenu*>("ViewMenu"))view->addAction(buildDock->toggleViewAction());
+    if(auto* view=menus->findChild<QMenu*>("ViewMenu"))view->addAction(buildDock->toggleViewAction());
 }
 void Window::createStatusBar(){
     statusBar()->setSizeGripEnabled(true);
@@ -375,7 +379,7 @@ void Window::installKeys(){
 void Window::setAppearance(const QString& mode,const QString& accent){
     Theme::apply(*qApp,mode,accent);
     for(auto* action:findChildren<QAction*>()){const auto kind=action->property("iconKind").toString();if(!kind.isEmpty())action->setIcon(commandIcon(kind));}
-    for(auto* card:cards)card->refreshAppearance();if(canvas)canvas->update();if(gallery)gallery->viewport()->update();
+    for(auto* card:cards)card->refreshAppearance();if(canvas)canvas->update();if(titleBar)titleBar->update();if(gallery)gallery->viewport()->update();
 #ifdef Q_OS_WIN
     if(HMODULE dwm=LoadLibraryW(L"dwmapi.dll")){using SetAttribute=HRESULT(WINAPI*)(HWND,DWORD,LPCVOID,DWORD);auto set=reinterpret_cast<SetAttribute>(GetProcAddress(dwm,"DwmSetWindowAttribute"));BOOL dark=mode!="light";if(set)set(reinterpret_cast<HWND>(winId()),20,&dark,sizeof dark);FreeLibrary(dwm);}
 #endif
@@ -555,6 +559,10 @@ void Window::removeGame(){
 }
 void Window::showContextMenu(const QPoint& point){QMenu menu(this);menu.addAction(playAction);menu.addAction(buildAction);menu.addAction(propertiesAction);menu.addSeparator();menu.addAction(folderAction);menu.addAction(saveFolderAction);menu.addAction(logAction);menu.addSeparator();menu.addAction(removeAction);menu.exec(point);}
 
+bool Window::nativeEvent(const QByteArray& eventType,void* message,qintptr* result){
+    if(titleBar&&titleBar->handleNativeEvent(eventType,message,result))return true;
+    return QMainWindow::nativeEvent(eventType,message,result);
+}
 bool Window::eventFilter(QObject* watched,QEvent* event){
     if(watched==toolStatus&&event->type()==QEvent::MouseButtonRelease){showToolPopup();return true;}
     if(toolPopup&&watched==toolPopup&&event->type()==QEvent::KeyPress&&static_cast<QKeyEvent*>(event)->key()==Qt::Key_Escape){toolPopup->close();return true;}

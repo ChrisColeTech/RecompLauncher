@@ -3,6 +3,7 @@
 #pragma once
 #include <QColor>
 #include <QIcon>
+#include <QPixmap>
 #include <QString>
 #include <QVector>
 class QApplication;
@@ -18,4 +19,6 @@ const Colors& colors();
 void apply(QApplication& app, const QString& mode = "dark", const QString& accent = "lime");
 QString stylesheet(const Colors& colors);
 QIcon appIcon();
+// The app glyph in a given accent (rounded square, controller cut out), for the in-app title bar.
+QPixmap accentGlyph(const QColor& accent, int size, qreal devicePixelRatio = 1.0);
 }
