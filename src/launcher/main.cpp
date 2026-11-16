@@ -11,17 +11,35 @@
 #include <QImageReader>
 #include <QStandardPaths>
 #include <QTimer>
+#include <QDirIterator>
+#include <QFile>
+
+// Earlier builds were named SwitchRecompLauncher and kept the library and installed keys under
+// <org>/SwitchRecompLauncher. Copy that folder once into <org>/RecompLauncher; the old one is left untouched.
+static void migrateLegacyData() {
+    const QDir current(QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation));
+    const QDir legacy(current.absoluteFilePath("../SwitchRecompLauncher"));
+    if (!legacy.exists() || QFileInfo::exists(current.filePath("library.json"))) return;
+    QDirIterator it(legacy.absolutePath(), QDir::Files | QDir::Hidden | QDir::NoDotAndDotDot, QDirIterator::Subdirectories);
+    while (it.hasNext()) {
+        const QString source = it.next();
+        const QString target = current.filePath(legacy.relativeFilePath(source));
+        QDir().mkpath(QFileInfo(target).absolutePath());
+        if (!QFileInfo::exists(target)) QFile::copy(source, target);
+    }
+}
 
 int main(int argc, char** argv) {
     QApplication app(argc, argv);
     QApplication::setOrganizationName("RecompLauncher");
-    QApplication::setApplicationName("SwitchRecompLauncher");
+    QApplication::setApplicationName("RecompLauncher");
+    migrateLegacyData();
     QApplication::setApplicationVersion("0.1.0");
     QApplication::setStyle("Fusion");
     Theme::apply(app);
     QFont font("Segoe UI", 9); app.setFont(font);
     QApplication::setWindowIcon(Theme::appIcon());
-    QCommandLineParser parser;     parser.setApplicationDescription("SwitchRecomp Launcher — native game library and build launcher");
+    QCommandLineParser parser;     parser.setApplicationDescription("RecompLauncher — native game library and build launcher");
     parser.addHelpOption(); parser.addVersionOption();
     parser.addOption({"root", "Vendored engine (Switch2RECOMP) directory", "directory"});
     parser.addOption({"library", "Use a specific library file", "file"});

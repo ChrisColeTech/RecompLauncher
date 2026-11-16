@@ -153,7 +153,8 @@ Direct-launch interpreter discovery changes in
 `third_party/Switch2RECOMP/runtime/nvn_hook.c` require a later runtime rebuild/deployment.
 
 The default library is `library.json` under Qt's local application-data directory for
-`RecompLauncher/SwitchRecompLauncher` (normally `%LOCALAPPDATA%\RecompLauncher\SwitchRecompLauncher`). It stores paths,
+`RecompLauncher/RecompLauncher` (normally `%LOCALAPPDATA%\RecompLauncher\RecompLauncher`; the older
+`SwitchRecompLauncher` folder is copied over once on first start and left in place). It stores paths,
 display metadata, per-game build options, view preferences, and window/dock layout. Writes are atomic.
 An unreadable/corrupt library is not silently overwritten.
 

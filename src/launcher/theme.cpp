@@ -37,10 +37,8 @@ void Theme::apply(QApplication& app,const QString& mode,const QString& accent){
     for(auto role:{QPalette::Text,QPalette::ButtonText,QPalette::WindowText})p.setColor(QPalette::Disabled,role,blend(c.muted,c.surface,.45));
     app.setPalette(p);app.setStyleSheet(stylesheet(c));app.setWindowIcon(appIcon());
 }
-QIcon Theme::appIcon(){
-    QPixmap pix(96,96);pix.fill(Qt::transparent);QPainter p(&pix);p.setRenderHint(QPainter::Antialiasing);p.setPen(Qt::NoPen);p.setBrush(current.accent);p.drawRoundedRect(pix.rect(),18,18);
-    p.setPen(current.accentText);p.setFont(QFont("Segoe UI",42,QFont::Black));p.drawText(pix.rect(),Qt::AlignCenter,"S/");return QIcon(pix);
-}
+// fixed app icon (scripts/make-icon.py); the same image is embedded in the Windows exe via app.rc
+QIcon Theme::appIcon(){ return QIcon(":/icons/app.png"); }
 QString Theme::stylesheet(const Colors& c){
     QString css=QStringLiteral(R"(
 QWidget { color: @text; font-family: 'Segoe UI'; font-size: 13px; }
