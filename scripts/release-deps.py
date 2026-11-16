@@ -8,7 +8,6 @@ import io
 import json
 import os
 from pathlib import Path
-import shutil
 import subprocess
 import sys
 import tarfile
@@ -45,42 +44,28 @@ VPX_SOURCES = {
     'libvpx_1.14.0.orig.tar.xz': '11150687870e4c94479abafe5d1ed38790e68dc7bbe08880fd5fb55138e4c6f3',
     'libvpx_1.14.0-1ubuntu2.3.debian.tar.xz': '9605b124232fe21980e2f1a4e7d86b2cedd0f72ac7961a02171eb90a7d762c34',
 }
-VPX_WINDOWS_SHA = '441569ee34a9731973b0ea670faa4a2133daedb3905ce81bd42d10c9820a5066'
+# The engine commits both static VP9-decoder archives, built from VPX_SOURCES (see each README); releases verify them.
+VPX_ARCHIVES = {
+    'windows': ('runtime/vp9/win', '441569ee34a9731973b0ea670faa4a2133daedb3905ce81bd42d10c9820a5066'),
+    'linux': ('runtime/vp9/lin', '2a2fa82e5141041dc6b18a5e7ce763707e23fde91cc34552e47ac0fbc2b2e545'),
+}
 PYTHON_FULL = ('https://github.com/astral-sh/python-build-standalone/releases/download/20261110/'
                'cpython-3.14.10%2B20261110-x86_64-unknown-linux-gnu-pgo%2Blto-full.tar.zst',
                '4730c0dc79e7eecbe54a323d587fdeaab621094fe09b5827167d69045115fcbc')
-VPX_FLAGS = ['--target=x86_64-linux-gcc', '--enable-static', '--disable-shared', '--enable-pic',
-             '--disable-vp8', '--disable-vp9-encoder', '--enable-vp9-decoder', '--disable-examples',
-             '--disable-tools', '--disable-docs', '--disable-unit-tests', '--enable-multithread', '--as=nasm']
 
 
-def prepare_vp9(dest, platform, jobs):
+def prepare_vp9(dest, platform):
+    """Verify the engine's committed libvpx and fetch the source it was built from (shipped under sources/)."""
     records = {}
     for name, sha in VPX_SOURCES.items():
         url = 'https://archive.ubuntu.com/ubuntu/pool/main/libv/libvpx/' + name
         deps.fetch(url, sha, str(dest / 'sources' / name))
         records[name] = {'url': url, 'sha256': sha}
-    if platform == 'windows':
-        lib = ENGINE / 'runtime/vp9/win/libvpx.a'
-        if hashlib.sha256(lib.read_bytes()).hexdigest() != VPX_WINDOWS_SHA:
-            raise RuntimeError('Vendored Windows libvpx differs from its documented source build')
-        return {'sources': records, 'sha256': VPX_WINDOWS_SHA, 'build': 'runtime/vp9/win/README.md'}
-    work = dest / 'native'; work.mkdir(exist_ok=True)
-    source = work / 'libvpx-source'
-    # dpkg-source applies the complete Ubuntu quilt series, including security patches.
-    if not source.exists():
-        subprocess.run(['dpkg-source', '--no-check', '-x', str(dest / 'sources/libvpx_1.14.0-1ubuntu2.3.dsc'), str(source)], check=True)
-    build = work / 'libvpx-build'; build.mkdir(exist_ok=True)
-    subprocess.run([str(source / 'configure'), *VPX_FLAGS], cwd=build, check=True)
-    subprocess.run(['make', '-j' + str(jobs)], cwd=build, check=True)
-    lib = ENGINE / 'runtime/vp9/lin/libvpx.a'
-    data = (build / 'libvpx.a').read_bytes()
-    if lib.exists() and lib.read_bytes() != data:
-        raise RuntimeError('Preserving existing Linux libvpx; move it aside explicitly before a release build: ' + str(lib))
-    lib.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(build / 'libvpx.a', lib)
-    return {'sources': records, 'sha256': hashlib.sha256(data).hexdigest(), 'configure': VPX_FLAGS,
-            'compiler': subprocess.check_output(['gcc', '--version'], text=True).splitlines()[0]}
+    folder, sha = VPX_ARCHIVES[platform]
+    lib = ENGINE / folder / 'libvpx.a'
+    if not lib.is_file() or hashlib.sha256(lib.read_bytes()).hexdigest() != sha:
+        raise RuntimeError('Committed libvpx differs from its documented source build: ' + str(lib))
+    return {'sources': records, 'sha256': sha, 'build': folder + '/README.md'}
 
 
 def python_notices(dest):
@@ -104,12 +89,11 @@ def python_notices(dest):
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--dest', type=Path, required=True)
-    ap.add_argument('--jobs', type=int, default=4)
     args = ap.parse_args()
     dest = args.dest.resolve(); dest.mkdir(parents=True, exist_ok=True)
     platform = 'windows' if os.name == 'nt' else 'linux'
     manifest = {'platform': platform, 'downloads': {}}
-    manifest['downloads']['libvpx'] = prepare_vp9(dest, platform, args.jobs)
+    manifest['downloads']['libvpx'] = prepare_vp9(dest, platform)
     if platform == 'linux': manifest['downloads']['python-notices'] = python_notices(dest)
     for module, sha in QT_SOURCES.items():
         name = module + '-everywhere-src-6.8.3.tar.xz'

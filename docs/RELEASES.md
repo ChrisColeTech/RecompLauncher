@@ -69,7 +69,7 @@ spaces and brackets, outside the checkout. With a minimal tool search path, the 
    and starts the shader helper. The synthetic game is never launched.
 
 Packaging requires linked VP9 and NVN telemetry markers in both native runtimes and Sony HID loader markers
-on Windows. The clean workflow builds the OpenGL/NVN desktop runtime, its audio mixer, and VP9 decoder.
+on Windows. The clean workflow builds the OpenGL/NVN desktop runtime and its audio mixer, and links the committed VP9 decoder.
 Optional Eden, OpenH264, Opus, and SPIRV-Cross/LSFG static libraries are not built by this workflow.
 Packaging replaces file symlinks with copies of their targets but keeps directory symlinks that stay inside
 the bundle as relative links: GCC finds `Scrt1.o` through its sysroot's `usr/lib -> lib64`. The bundled GCC
@@ -91,7 +91,6 @@ needs Git and Python 3.14+ (including zstd support). Launcher builds need Qt 6.8
 and `qtsvg`, and a native C/C++ build environment. Windows needs VS 2022 Build Tools; Linux needs CMake,
 Ninja, GCC/G++, X11/OpenGL development headers, and `glslang-tools`. Windows runtime builds also need
 glslang on PATH; the workflow builds glslang 15.1.0 from source with VS 2022 x64.
-Linux dependency preparation also requires `dpkg-dev`, Make, GCC/G++, and NASM for the pinned VP9 build.
 
 ```text
 python scripts/release-deps.py --dest build/release-deps
@@ -99,10 +98,9 @@ python scripts/release-deps.py --dest build/release-deps
 
 This downloads checksum-pinned portable dependencies into a separate directory.
 Both bundles retain the libvpx 1.14.0 Ubuntu `1ubuntu2.3` source package and patches under `sources/`.
-Windows verifies the engine's checked-in `runtime/vp9/win/libvpx.a` against its documented hash. Linux
-applies the complete Ubuntu patch series with `dpkg-source`, then builds a static PIC, multithreaded VP9-only
-decoder into the engine's `runtime/vp9/lin/libvpx.a`, recording configure options, compiler version and
-binary hash. An existing different Linux archive is preserved and must be moved aside explicitly.
+The engine commits both VP9-decoder archives, `runtime/vp9/win/libvpx.a` and `runtime/vp9/lin/libvpx.a`,
+built from that source as documented in the README beside each one; nothing is compiled here. Each is verified
+against its pinned SHA-256, which the dependency manifest records with the source hashes and the README path.
 If an archive extraction was interrupted, remove only that incomplete dependency
 subdirectory and rerun the command.
 

@@ -220,27 +220,33 @@ class ReleaseChecks(unittest.TestCase):
             self.assertIn(str(rt / 'audio.c'), command)
             self.assertIn(str(rt / 'svc_hid.c'), command)
 
-    def test_linux_vp9_build_records_provenance_and_preserves_existing_library(self):
+    def test_vp9_archives_verified_not_built_and_sources_recorded(self):
         dest = self.root / 'deps'; dest.mkdir()
         def fetch(url, sha, cache):
             path = Path(cache); path.parent.mkdir(parents=True, exist_ok=True); path.write_bytes(b'source fixture')
-        def build(command, **kwargs):
-            if command[0] == 'dpkg-source': Path(command[-1]).mkdir()
-            if command[0] == 'make': (Path(kwargs['cwd']) / 'libvpx.a').write_bytes(b'compiled fixture')
-        with patch.object(dependencies, 'ENGINE', self.root), patch.object(dependencies.deps, 'fetch', side_effect=fetch), \
-             patch.object(dependencies.subprocess, 'run', side_effect=build) as run, \
-             patch.object(dependencies.subprocess, 'check_output', return_value='gcc fixture\n'):
-            record = dependencies.prepare_vp9(dest, 'linux', 4)
-            lib = self.root / 'runtime/vp9/lin/libvpx.a'
-            self.assertEqual(record['sha256'], package.digest(lib))
-            self.assertIn('--enable-pic', record['configure'])
-            self.assertIn('--disable-vp9-encoder', record['configure'])
-            self.assertEqual(record['compiler'], 'gcc fixture')
-            self.assertEqual(run.call_args_list[0].args[0][0], 'dpkg-source')
-            lib.write_bytes(b'existing local build')
-            with self.assertRaisesRegex(RuntimeError, 'Preserving existing'):
-                dependencies.prepare_vp9(dest, 'linux', 4)
-            self.assertEqual(lib.read_bytes(), b'existing local build')
+        archives = {}
+        for platform, folder in (('windows', 'win'), ('linux', 'lin')):
+            lib = self.root / 'runtime/vp9' / folder / 'libvpx.a'; lib.parent.mkdir(parents=True)
+            lib.write_bytes(platform.encode()); archives[platform] = ('runtime/vp9/' + folder, package.digest(lib))
+        with patch.object(dependencies, 'ENGINE', self.root), patch.object(dependencies, 'VPX_ARCHIVES', archives), \
+             patch.object(dependencies.deps, 'fetch', side_effect=fetch), \
+             patch.object(dependencies.subprocess, 'run', side_effect=AssertionError('VP9 must not be built')):
+            for platform, (folder, sha) in archives.items():
+                record = dependencies.prepare_vp9(dest, platform)
+                self.assertEqual(record['sha256'], sha)
+                self.assertEqual(record['build'], folder + '/README.md')
+                self.assertEqual(set(record['sources']), set(dependencies.VPX_SOURCES))
+                self.assertTrue(all(r['url'].startswith('https://archive.ubuntu.com/') for r in record['sources'].values()))
+                lib = self.root / folder / 'libvpx.a'; data = lib.read_bytes()
+                lib.write_bytes(b'rebuilt locally')
+                with self.assertRaisesRegex(RuntimeError, 'documented source build'): dependencies.prepare_vp9(dest, platform)
+                lib.unlink()
+                with self.assertRaisesRegex(RuntimeError, 'documented source build'): dependencies.prepare_vp9(dest, platform)
+                lib.write_bytes(data)
+        for name in dependencies.VPX_SOURCES: self.assertTrue((dest / 'sources' / name).is_file())
 
+    def test_committed_vp9_archives_match_pins(self):
+        for folder, sha in dependencies.VPX_ARCHIVES.values():
+            self.assertEqual(package.digest(dependencies.ENGINE / folder / 'libvpx.a'), sha, folder)
 
 if __name__ == '__main__': unittest.main()

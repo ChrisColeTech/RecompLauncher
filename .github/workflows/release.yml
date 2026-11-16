@@ -50,7 +50,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential cmake ninja-build nasm dpkg-dev glslang-tools libx11-dev libgl-dev libegl1 libopengl0 libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-render-util0
+          sudo apt-get install -y build-essential cmake ninja-build glslang-tools libx11-dev libgl-dev libegl1 libopengl0 libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-render-util0
       - uses: jurplel/install-qt-action@v4
         with:
           version: '6.8.3'
@@ -146,7 +146,6 @@ jobs:
             logs/
             build/launcher-*/Testing/Temporary/LastTest.log
             ${{ env.ENGINE }}/build/controllers-*/checks.log
-            build/release-deps/native/libvpx-build/config.log
 
   release:
     needs: build
