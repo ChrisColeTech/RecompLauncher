@@ -403,11 +403,11 @@ void Window::refreshTools(){
 
 // The engine's button_layout values; the same two choices in Settings > Controller and Properties > Runtime.
 static void addButtonLayouts(QComboBox* box){
-    box->addItem("Nintendo — by position (A right, B bottom)","nintendo");box->addItem("Xbox — by label (A bottom, B right)","xbox");
+    box->addItem("Switch — by position (A right, B bottom)","switch");box->addItem("Xbox — by label (A bottom, B right)","xbox");
     box->setItemData(box->count()-2,"Switch positions on every pad: PlayStation Circle = A, Cross = B, Triangle = X, Square = Y",Qt::ToolTipRole);
     box->setItemData(box->count()-1,"Printed Xbox letters: PlayStation Cross = A, Circle = B, Square = X, Triangle = Y",Qt::ToolTipRole);
 }
-static QString buttonLayoutName(const QString& layout){return layout=="xbox"?"Xbox labels":"Nintendo positions";}
+static QString buttonLayoutName(const QString& layout){return layout=="xbox"?"Xbox":"Switch";}
 bool Window::editGame(Game& game,int tab,bool adding){
     const bool locked=running.contains(game.id)||(builder.busy()&&builder.gameId()==game.id);
     QDialog dialog(this);dialog.setWindowTitle(adding?"Add game":game.title+" — Properties");dialog.resize(670,400);
@@ -475,7 +475,7 @@ void Window::showSettings(int initialTab){
     auto* workers=new QSpinBox;workers->setRange(1,64);workers->setValue(library.jobs);builds->addRow("Compiler workers",workers);
     auto* controller=tabForm(tabs,"Controller");auto* buttonLayout=new QComboBox;addButtonLayouts(buttonLayout);
     buttonLayout->setCurrentIndex(qMax(0,buttonLayout->findData(library.buttonLayout)));controller->addRow("Button layout",buttonLayout);
-    auto* controllerNote=textLabel("Applies to Xbox, PlayStation and other controllers. Nintendo keeps the Switch positions, so on a PlayStation pad Circle is A and Cross is B. Xbox follows the printed Xbox letters: Cross is A, Square is X.\n\nSaved into every built game that uses the default (a running game switches live). Override it per game in Properties > Runtime; single buttons can be remapped with button_map in the game's INI.","Muted");
+    auto* controllerNote=textLabel("Applies to Xbox, PlayStation and other controllers. Switch keeps the Switch pad's positions, so on a PlayStation pad Circle is A and Cross is B. Xbox follows the printed Xbox letters: Cross is A, Square is X.\n\nSaved into every built game that uses the default (a running game switches live). Override it per game in Properties > Runtime; single buttons can be remapped with button_map in the game's INI.","Muted");
     controllerNote->setWordWrap(true);controller->addRow(controllerNote);
     auto* appearance=tabForm(tabs,"Appearance");
     auto* mode=new QComboBox;mode->addItem("Dark","dark");mode->addItem("Light","light");mode->setCurrentIndex(library.colorMode=="light"?1:0);appearance->addRow("Color mode",mode);

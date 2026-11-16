@@ -131,30 +131,34 @@ private slots:
     void buttonLayoutIni() {
         QTemporaryDir tmp; const QString path=tmp.filePath("Game.ini");
         // the runtime's own INI: [Controls] already has the key (it writes every key with its default)
-        const QByteArray original="; keep\r\n[Controls]\r\n; help text\r\nbutton_layout=nintendo\r\nbutton_map=south:a\r\n[Graphics]\r\nrenderer=opengl\r\n";
+        const QByteArray original="; keep\r\n[Controls]\r\n; help text\r\nbutton_layout=switch\r\nbutton_map=south:a\r\n[Graphics]\r\nrenderer=opengl\r\n";
         {QFile f(path); QVERIFY(f.open(QIODevice::WriteOnly)); f.write(original);}
         QString error; QVERIFY2(writeButtonLayout(path,"xbox",&error),qPrintable(error));
         auto read=[&path]{QFile f(path); return f.open(QIODevice::ReadOnly)?f.readAll():QByteArray();};
-        QByteArray expected=original; expected.replace("button_layout=nintendo","button_layout=xbox"); QCOMPARE(read(),expected);
+        QByteArray expected=original; expected.replace("button_layout=switch","button_layout=xbox"); QCOMPARE(read(),expected);
         QVERIFY(!writeButtonLayout(path,"sega",&error)); QVERIFY(!writeButtonLayout(path,"",&error)); QCOMPARE(read(),expected);
         // an older INI without the key: added under [Controls], or a new [Controls] section
         {QFile f(path); QVERIFY(f.open(QIODevice::WriteOnly|QIODevice::Truncate)); f.write("[Controls]\nmouse_invert=0\n");}
-        QVERIFY(writeButtonLayout(path,"nintendo",&error)); QCOMPARE(read(),QByteArray("[Controls]\nbutton_layout=nintendo\nmouse_invert=0\n"));
+        QVERIFY(writeButtonLayout(path,"switch",&error)); QCOMPARE(read(),QByteArray("[Controls]\nbutton_layout=switch\nmouse_invert=0\n"));
         QVERIFY(QFile::remove(path)); QVERIFY(writeButtonLayout(path,"xbox",&error)); QVERIFY(read().contains("[Controls]\nbutton_layout=xbox\n"));
         // inherit vs override, and the full set the launcher writes at build/play time
         Game game; game.buildDir=tmp.path(); game.outputName="Game"; game.renderer="vulkan";
-        QCOMPARE(effectiveButtonLayout(game,"xbox"),QString("xbox")); QCOMPARE(effectiveButtonLayout(game,"nintendo"),QString("nintendo"));
-        QCOMPARE(effectiveButtonLayout(game,"bogus"),QString("nintendo"));
-        game.buttonLayout="nintendo"; QCOMPARE(effectiveButtonLayout(game,"xbox"),QString("nintendo"));
+        QCOMPARE(effectiveButtonLayout(game,"xbox"),QString("xbox")); QCOMPARE(effectiveButtonLayout(game,"switch"),QString("switch"));
+        QCOMPARE(effectiveButtonLayout(game,"bogus"),QString("switch"));
+        game.buttonLayout="switch"; QCOMPARE(effectiveButtonLayout(game,"xbox"),QString("switch"));
         QVERIFY(QFile::remove(path)); QVERIFY2(writeGameSettings(game,"xbox",&error),qPrintable(error));
-        QVERIFY(read().contains("renderer=vulkan")); QVERIFY(read().contains("button_layout=nintendo"));
-        game.buttonLayout.clear(); QVERIFY(writeGameSettings(game,"xbox",&error)); QVERIFY(read().contains("button_layout=xbox")); QVERIFY(!read().contains("button_layout=nintendo"));
-        QVERIFY(validButtonLayout("") && validButtonLayout("xbox") && !validButtonLayout("label"));
+        QVERIFY(read().contains("renderer=vulkan")); QVERIFY(read().contains("button_layout=switch"));
+        game.buttonLayout.clear(); QVERIFY(writeGameSettings(game,"xbox",&error)); QVERIFY(read().contains("button_layout=xbox")); QVERIFY(!read().contains("button_layout=switch"));
+        QVERIFY(validButtonLayout("") && validButtonLayout("xbox") && !validButtonLayout("label") && !validButtonLayout("nintendo"));
+        // the engine's old/alias names are read but never written
+        QCOMPARE(normalizeButtonLayout("nintendo"),QString("switch")); QCOMPARE(normalizeButtonLayout("labels"),QString("xbox"));
+        game.buttonLayout="nintendo"; QCOMPARE(effectiveButtonLayout(game,"xbox"),QString("switch")); QVERIFY(!writeButtonLayout(path,"nintendo",&error));
+        QCOMPARE(Game::fromJson({{"buttonLayout","nintendo"}}).buttonLayout,QString("switch"));
     }
     void libraryRoundTripAndCorruption() {
         QTemporaryDir tmp; const QString file=tmp.filePath("nested/library.json");
         Library lib(file); Game game=gameFromSource(tmp.filePath("My Game [v1].nup"));
-        game.cover="art.png"; game.background="wallpaper.png"; game.renderer="vulkan"; game.workers=3; game.optimization=1; game.buttonLayout="nintendo";
+        game.cover="art.png"; game.background="wallpaper.png"; game.renderer="vulkan"; game.workers=3; game.optimization=1; game.buttonLayout="switch";
         lib.add(game); lib.buttonLayout="xbox"; lib.jobs=4; lib.viewMode=1; lib.coverWidth=220; lib.showBackground=false;lib.colorMode="light";lib.accentColor="violet";lib.keysPath="D:/Keys/prod.keys";
         QString error; QVERIFY2(lib.save(&error),qPrintable(error));
         Library loaded(file); QVERIFY(loaded.load(&error)); QCOMPARE(loaded.games.size(),1); QCOMPARE(loaded.jobs,4);
@@ -163,9 +167,9 @@ private slots:
         QCOMPARE(loaded.viewMode,1); QCOMPARE(loaded.coverWidth,220); QVERIFY(!loaded.showBackground);
         QCOMPARE(loaded.colorMode,QString("light"));QCOMPARE(loaded.accentColor,QString("violet"));
         QCOMPARE(loaded.keysPath,QString("D:/Keys/prod.keys"));
-        QCOMPARE(loaded.buttonLayout,QString("xbox")); QCOMPARE(loaded.games.front().buttonLayout,QString("nintendo"));
+        QCOMPARE(loaded.buttonLayout,QString("xbox")); QCOMPARE(loaded.games.front().buttonLayout,QString("switch"));
         // a new library defaults to the engine default; games without the key inherit; unknown values never reach an INI
-        QCOMPARE(Library(file).buttonLayout,QString("nintendo")); QVERIFY(Game::fromJson({{"buttonLayout","sega"}}).buttonLayout.isEmpty());
+        QCOMPARE(Library(file).buttonLayout,QString("switch")); QVERIFY(Game::fromJson({{"buttonLayout","sega"}}).buttonLayout.isEmpty());
         QVERIFY(Game::fromJson({}).buttonLayout.isEmpty());
         QVERIFY(!loaded.add(game));
         {QFile f(file); QVERIFY(f.open(QIODevice::WriteOnly|QIODevice::Truncate)); f.write("bad json");}

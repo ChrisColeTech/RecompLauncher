@@ -103,8 +103,7 @@ Game Game::fromJson(const QJsonObject& o) {
     g.workers = qBound(0, o["workers"].toInt(), 64);
     g.optimization = qBound(0, o["optimization"].toInt(2), 3);
     if (g.renderer != "vulkan" && g.renderer != "opengl") g.renderer = "opengl";
-    g.buttonLayout = o["buttonLayout"].toString();
-    if (!validButtonLayout(g.buttonLayout)) g.buttonLayout.clear();
+    g.buttonLayout = normalizeButtonLayout(o["buttonLayout"].toString());
     g.builtSource = o["builtSource"].toString();
     g.buildIncomplete = o["buildIncomplete"].toBool();
     g.lastPlayed = QDateTime::fromString(o["lastPlayed"].toString(), Qt::ISODate);
@@ -214,8 +213,8 @@ bool Library::load(QString* error) {
     colorMode = o["colorMode"].toString("dark");
     if(colorMode!="light"&&colorMode!="dark")colorMode="dark";
     accentColor = o["accentColor"].toString("lime");
-    buttonLayout = o["buttonLayout"].toString("nintendo");
-    if (buttonLayout != "nintendo" && buttonLayout != "xbox") buttonLayout = "nintendo";
+    buttonLayout = normalizeButtonLayout(o["buttonLayout"].toString());
+    if (buttonLayout.isEmpty()) buttonLayout = "switch";
     geometry = QByteArray::fromBase64(o["geometry"].toString().toLatin1());
     dockState = QByteArray::fromBase64(o["dockState"].toString().toLatin1());
     games.clear();
@@ -383,13 +382,19 @@ bool writeRenderer(const QString& ini, const QString& renderer, QString* error) 
     if (renderer != "vulkan" && renderer != "opengl") return fail(error, "Unknown renderer.");
     return writeIniKey(ini, "Graphics", "renderer", renderer, error);
 }
-bool validButtonLayout(const QString& layout) { return layout.isEmpty() || layout == "nintendo" || layout == "xbox"; }
+bool validButtonLayout(const QString& layout) { return layout.isEmpty() || layout == "switch" || layout == "xbox"; }
+QString normalizeButtonLayout(const QString& layout) {
+    if (layout == "switch" || layout == "nintendo" || layout == "position" || layout == "positions") return "switch";
+    if (layout == "xbox" || layout == "label" || layout == "labels") return "xbox";
+    return {};
+}
 QString effectiveButtonLayout(const Game& game, const QString& launcherDefault) {
-    if (game.buttonLayout == "nintendo" || game.buttonLayout == "xbox") return game.buttonLayout;
-    return launcherDefault == "xbox" ? "xbox" : "nintendo";
+    const QString own = normalizeButtonLayout(game.buttonLayout);
+    if (!own.isEmpty()) return own;
+    return normalizeButtonLayout(launcherDefault) == "xbox" ? "xbox" : "switch";
 }
 bool writeButtonLayout(const QString& ini, const QString& layout, QString* error) {
-    if (layout != "nintendo" && layout != "xbox") return fail(error, "Unknown controller layout.");
+    if (layout != "switch" && layout != "xbox") return fail(error, "Unknown controller layout.");
     return writeIniKey(ini, "Controls", "button_layout", layout, error);
 }
 bool writeGameSettings(const Game& game, const QString& launcherLayout, QString* error) {

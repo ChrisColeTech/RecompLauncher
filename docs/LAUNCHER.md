@@ -110,7 +110,7 @@ tools, Python, and .NET 10. The launcher checks the latter tools and reports mis
 launching a Vulkan game with no shader translator.
 
 **Settings → Controller** sets the default controller button layout, the engine's `button_layout` INI key:
-**Nintendo** (by position like the Switch: right = A, bottom = B; on a PlayStation pad Circle = A, Cross = B) or
+**Switch** (by position like the Switch pad: right = A, bottom = B; on a PlayStation pad Circle = A, Cross = B) or
 **Xbox** (by the printed Xbox letters: Cross = A, Square = X). **Properties → Runtime → Controller layout** overrides
 it per game ("Use default" inherits). The launcher writes the effective value into the game INI after a build, on
 every Play, and right away when either setting changes for an already-built game (a running game applies it live).
