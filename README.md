@@ -145,7 +145,11 @@ RomFS copy and is read in place at runtime. NSP inputs need `prod.keys` installe
 .venv\Scripts\python.exe third_party\Switch2RECOMP\tests\test_nsp.py -v
 .venv\Scripts\python.exe tests\test_python_selection.py -v
 .venv\Scripts\python.exe tests\test_launcher_workflow.py -v
+.venv\Scripts\python.exe tests\test_release.py -v
 ```
+
+`test_release` covers the portable-release packaging contracts. Building, packaging and smoke-testing a
+release bundle locally is described in [docs/RELEASES.md](docs/RELEASES.md).
 
 `test_launcher_workflow` exercises the deployed launcher end to end: it imports an existing native
 build without compiling, and drives a real build of a synthetic, game-data-free NUP through the

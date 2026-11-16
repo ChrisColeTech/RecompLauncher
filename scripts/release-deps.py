@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 # RecompLauncher - native game library and build launcher.
 # The vendored Switch2RECOMP engine keeps its AGPL-3.0 notices under third_party/Switch2RECOMP.
-
 """Fetch checksum-pinned redistributable tools into an isolated release dependency directory."""
 import argparse
 import hashlib
@@ -17,7 +16,8 @@ import urllib.request
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / 'tool'))
+ENGINE = ROOT / 'third_party' / 'Switch2RECOMP'   # engine submodule: get_deps.py and the VP9 archives
+sys.path.insert(0, str(ENGINE / 'tool'))
 import get_deps as deps
 
 ASSETS = {
@@ -61,7 +61,7 @@ def prepare_vp9(dest, platform, jobs):
         deps.fetch(url, sha, str(dest / 'sources' / name))
         records[name] = {'url': url, 'sha256': sha}
     if platform == 'windows':
-        lib = ROOT / 'runtime/vp9/win/libvpx.a'
+        lib = ENGINE / 'runtime/vp9/win/libvpx.a'
         if hashlib.sha256(lib.read_bytes()).hexdigest() != VPX_WINDOWS_SHA:
             raise RuntimeError('Vendored Windows libvpx differs from its documented source build')
         return {'sources': records, 'sha256': VPX_WINDOWS_SHA, 'build': 'runtime/vp9/win/README.md'}
@@ -73,7 +73,7 @@ def prepare_vp9(dest, platform, jobs):
     build = work / 'libvpx-build'; build.mkdir(exist_ok=True)
     subprocess.run([str(source / 'configure'), *VPX_FLAGS], cwd=build, check=True)
     subprocess.run(['make', '-j' + str(jobs)], cwd=build, check=True)
-    lib = ROOT / 'runtime/vp9/lin/libvpx.a'
+    lib = ENGINE / 'runtime/vp9/lin/libvpx.a'
     data = (build / 'libvpx.a').read_bytes()
     if lib.exists() and lib.read_bytes() != data:
         raise RuntimeError('Preserving existing Linux libvpx; move it aside explicitly before a release build: ' + str(lib))
@@ -153,10 +153,10 @@ def main():
     # use the bundled 3.14 interpreter, including its built-in zstd decompressor
     python = dest / ('python/python.exe' if os.name == 'nt' else 'python/bin/python3')
     code = "import sys; sys.path.insert(0, sys.argv[1]); import get_deps as d; d.HERE=sys.argv[2]; d.DEST=d.os.path.join(d.HERE,'gcc'); d.CC=d.os.path.join(d.DEST,'Library','bin','x86_64-w64-mingw32-gcc.exe') if d.WIN else d.os.path.join(d.DEST,'bin','x86_64-conda-linux-gnu-gcc'); d.LIB=d.os.path.join(d.HERE,'lib'); d.HACTOOL=d.os.path.join(d.HERE,'tools','hactool'); sys.exit(d.install_gcc(force=True) | (d.install_hactool() if d.WIN else d.install_sdl()))"
-    subprocess.run([str(python), '-c', code, str(ROOT / 'tool'), str(dest)], check=True)
+    subprocess.run([str(python), '-c', code, str(ENGINE / 'tool'), str(dest)], check=True)
     package, sha = SPIRV[platform]
     code = "import sys; sys.path.insert(0,sys.argv[1]); import get_deps as d; d.DEST=sys.argv[2]; d.os.makedirs(d.DEST,exist_ok=True); d.relocate(d.unpack(d.get(sys.argv[3],sys.argv[4]),sys.argv[3].split('/')[-1]),d.DEST)"
-    subprocess.run([str(python), '-c', code, str(ROOT / 'tool'), str(dest / 'shader-tools'), package, sha], check=True)
+    subprocess.run([str(python), '-c', code, str(ENGINE / 'tool'), str(dest / 'shader-tools'), package, sha], check=True)
     manifest['downloads']['spirv-tools'] = {'url': deps.URL + package, 'sha256': sha}
     manifest['downloads']['gcc'] = {deps.URL + p: {'sha256': sha} for p, sha in deps.PKGS.items()}
     if platform == 'windows': manifest['downloads']['hactool'] = {'url': deps.HACTOOL_ZIP[0], 'sha256': deps.HACTOOL_ZIP[1]}

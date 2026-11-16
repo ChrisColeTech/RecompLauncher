@@ -7,6 +7,12 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      platform:
+        description: 'Which bundle to build'
+        type: choice
+        default: all
+        options: [all, windows, linux]
 
 permissions:
   contents: read
@@ -15,24 +21,28 @@ concurrency:
   group: portable-release-${{ github.ref }}
   cancel-in-progress: false
 
+env:
+  ENGINE: third_party/Switch2RECOMP   # the engine submodule (turbo branch of Switch2RECOMP-turbo)
+
 jobs:
   build:
     strategy:
       fail-fast: false
       matrix:
+        platform: ${{ github.event_name != 'workflow_dispatch' && fromJSON('["windows", "linux"]') || (inputs.platform != 'all' && fromJSON(format('["{0}"]', inputs.platform)) || fromJSON('["windows", "linux"]')) }}
         include:
-          - os: windows-2022
-            platform: windows
+          - platform: windows
+            os: windows-2022
             qt_arch: win64_msvc2022_64
-          - os: ubuntu-24.04
-            platform: linux
+          - platform: linux
+            os: ubuntu-24.04
             qt_arch: linux_gcc_64
     runs-on: ${{ matrix.os }}
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
         with:
-          submodules: true   # third_party/Switch2RECOMP is the turbo engine fork
+          submodules: true
       - uses: actions/setup-python@v5
         with:
           python-version: '3.14'
@@ -49,17 +59,19 @@ jobs:
           cache: true
       - name: Download bundled tools and license sources
         run: python scripts/release-deps.py --dest build/release-deps
-      - name: Python regression tests
-        run: python -m unittest discover -s tests -p "test_n*.py"
-      - name: Python selection tests
-        run: python tests/test_python_selection.py -v
+      - name: Engine Python regression tests
+        run: python -m unittest discover -s ${{ env.ENGINE }}/tests -p "test_n*.py"
+      - name: Python selection tests (engine and launcher)
+        run: |
+          python ${{ env.ENGINE }}/tests/test_python_selection.py -v
+          python tests/test_python_selection.py -v
       - name: Packaging regression tests
         run: python tests/test_release.py -v
       - name: Linux audio regression tests
         if: runner.os == 'Linux'
         env:
           LD_LIBRARY_PATH: ${{ github.workspace }}/build/release-deps/lib
-        run: sh tests/run_audio.sh
+        run: sh ${{ env.ENGINE }}/tests/run_audio.sh
       - name: Windows launcher build dependencies
         if: runner.os == 'Windows'
         run: python -m pip install cmake==3.31.10 ninja==1.13.2
@@ -80,29 +92,29 @@ jobs:
         run: |
           $env:PATH = "$pwd\build\release-deps\gcc\Library\bin;$env:PATH"
           $env:NXSHADER_TOOLS = "$pwd\build\release-deps\shader-tools\Library\bin"
-          New-Item -ItemType Directory -Force build/mkw-investigation | Out-Null
-          python tests/test_controllers.py
+          New-Item -ItemType Directory -Force "$env:ENGINE/build/mkw-investigation" | Out-Null
+          python "$env:ENGINE/tests/test_controllers.py"
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          python tests/test_mkw_runtime.py
+          python "$env:ENGINE/tests/test_mkw_runtime.py"
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
       - name: Windows runtime and launcher
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
           $env:PATH = "$pwd\build\release-deps\gcc\Library\bin;$env:PATH"
-          python tools/build_nvn.py --jobs 4
+          python "$env:ENGINE/tools/build_nvn.py" --jobs 4
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          if (-not (Test-Path build/nvn/libnvn.a)) { throw 'NVN archive missing' }
-          python switchrecomp.py --build-runtime --target win64 --backend win32 --cc "$pwd\build\release-deps\gcc\Library\bin\x86_64-w64-mingw32-gcc.exe"
+          if (-not (Test-Path "$env:ENGINE/build/nvn/libnvn.a")) { throw 'NVN archive missing' }
+          python src/recomp_cli.py --build-runtime --target win64 --backend win32 --cc "$pwd\build\release-deps\gcc\Library\bin\x86_64-w64-mingw32-gcc.exe"
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           ./scripts/build-launcher.ps1 -QtPrefix $env:QT_ROOT_DIR -Jobs 4
       - name: Linux runtime and launcher
         if: runner.os == 'Linux'
         run: |
-          python tools/build_nvn.py --linux --jobs 4
-          test -s build/nvn_lin/libnvn.a
-          test -s runtime/vp9/lin/libvpx.a
-          python switchrecomp.py --build-runtime --target linux --backend x11 --cc gcc
+          python "$ENGINE/tools/build_nvn.py" --linux --jobs 4
+          test -s "$ENGINE/build/nvn_lin/libnvn.a"
+          test -s "$ENGINE/runtime/vp9/lin/libvpx.a"
+          python src/recomp_cli.py --build-runtime --target linux --backend x11 --cc gcc
           SWR_QT_PREFIX="$QT_ROOT_DIR" SWR_JOBS=4 sh scripts/build-launcher.sh
       - name: Package Windows
         if: runner.os == 'Windows'
@@ -133,17 +145,19 @@ jobs:
           path: |
             logs/
             build/launcher-*/Testing/Temporary/LastTest.log
-            build/controllers-*/checks.log
+            ${{ env.ENGINE }}/build/controllers-*/checks.log
             build/release-deps/native/libvpx-build/config.log
 
   release:
     needs: build
-    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && (github.event_name != 'workflow_dispatch' || inputs.platform == 'all')
     runs-on: ubuntu-24.04
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: true
       - uses: actions/download-artifact@v4
         with:
           pattern: portable-*
@@ -157,6 +171,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           tag="turbo-${GITHUB_RUN_NUMBER}-${GITHUB_RUN_ATTEMPT}"
-          git archive --format=tar.gz --prefix=Switch2RECOMP-turbo-source/ -o "release/Switch2RECOMP-turbo-source.tar.gz" "$GITHUB_SHA"
-          (cd release && sha256sum Switch2RECOMP-turbo-source.tar.gz > Switch2RECOMP-turbo-source.tar.gz.sha256)
+          prefix=Switch2RECOMP-turbo-source
+          # git archive leaves submodules out; append the pinned engine so the source archive is complete (AGPL)
+          git archive --format=tar --prefix="$prefix/" -o release/source.tar "$GITHUB_SHA"
+          git -C "$ENGINE" archive --format=tar --prefix="$prefix/$ENGINE/" -o "$PWD/release/engine.tar" HEAD
+          tar --concatenate -f release/source.tar release/engine.tar
+          gzip -n -c release/source.tar > "release/$prefix.tar.gz"
+          rm release/source.tar release/engine.tar
+          (cd release && sha256sum "$prefix.tar.gz" > "$prefix.tar.gz.sha256")
           gh release create "$tag" release/*.zip release/*.tar.gz release/*.sha256 --target "$GITHUB_SHA" --title "Switch2RECOMP turbo build ${GITHUB_RUN_NUMBER}" --notes-file docs/RELEASE_NOTES.md --latest

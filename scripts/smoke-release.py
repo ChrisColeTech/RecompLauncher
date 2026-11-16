@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 # RecompLauncher - native game library and build launcher.
 # The vendored Switch2RECOMP engine keeps its AGPL-3.0 notices under third_party/Switch2RECOMP.
-
 """Extract an archive away from the checkout, build a synthetic NUP, and probe its bundled tools."""
 import argparse
 import importlib.util
@@ -16,7 +15,7 @@ import tempfile
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / 'third_party' / 'Switch2RECOMP' / 'tests'))   # engine's synthetic NUP helpers
+sys.path.insert(0, str(ROOT / 'third_party/Switch2RECOMP/tests'))   # engine's synthetic NUP helpers
 from test_nup import minimal_nso, write_nup
 spec = importlib.util.spec_from_file_location('release_package', ROOT / 'scripts/package-release.py')
 package = importlib.util.module_from_spec(spec)
@@ -94,40 +93,64 @@ def main():
         for key in ('HOME', 'USERPROFILE', 'APPDATA', 'LOCALAPPDATA', 'XDG_CONFIG_HOME', 'XDG_CACHE_HOME', 'XDG_DATA_HOME'):
             env[key] = str(home)
         if not win: env['LD_LIBRARY_PATH'] = str(root / 'lib') + ':' + str(root / 'gcc/lib')
+        engine = root / package.ENGINE_DIR
         python = root / ('python/python.exe' if win else 'python/bin/python3')
         dotnet = root / ('dotnet/dotnet.exe' if win else 'dotnet/dotnet')
         cc = root / ('gcc/Library/bin/x86_64-w64-mingw32-gcc.exe' if win else 'gcc/bin/x86_64-conda-linux-gnu-gcc')
         shader_tools = root / ('shader-tools/Library/bin' if win else 'shader-tools/bin')
         env['NXSHADER_TOOLS'] = str(shader_tools)
         env['PATH'] = os.pathsep.join([str(cc.parent), str(root / 'bin/launcher'), str(shader_tools), env['PATH']])
+        if not win:
+            trace = subprocess.run(['sh', '-x', root / 'fix-gcc.sh'], cwd=temp, env=env, capture_output=True,
+                                   text=True, timeout=120)
+            print(trace.stdout + trace.stderr)
+            if trace.returncode: raise RuntimeError(f'fix-gcc.sh exited {trace.returncode}\n{trace.stdout}\n{trace.stderr}')
+            probe = subprocess.run([cc, '-print-sysroot', '-dumpmachine'], cwd=temp, env=env, capture_output=True,
+                                   text=True, timeout=60)
+            print('gcc sysroot probe:', probe.stdout, probe.stderr)
+            sysroot = root / 'gcc/x86_64-conda-linux-gnu/sysroot'
+            listing = run(['sh', '-c',
+                           'echo "== sysroot lib64 =="; ls -la "$1/usr/lib64" | sed -n "1,12p"; '
+                           'echo "== Scrt1.o =="; ls -l "$1/usr/lib64/Scrt1.o"; '
+                           'echo "== alias =="; ls -l /tmp/switchrecomp-toolchains/', 'sh', sysroot], temp, env)
+            print(listing)
+            expanded = subprocess.run([cc, '-###', '-E', '-x', 'c', '-'], cwd=temp, env=env, capture_output=True,
+                                      text=True, timeout=60, input='')
+            print('gcc expansion:', expanded.stdout, expanded.stderr)
+            if probe.returncode or 'x86_64-conda-linux-gnu' not in probe.stdout:
+                raise RuntimeError(f'Relocated GCC is unusable: {probe.stdout}{probe.stderr}')
         for tool in ('spirv-as', 'spirv-val', 'spirv-opt'):
             run([shader_tools / (tool + ('.exe' if win else '')), '--version'], temp, env)
         if win:
-            probe = subprocess.run([root / 'tools/hactool/hactool.exe', '--help'], cwd=temp, env=env,
+            probe = subprocess.run([engine / 'tools/hactool/hactool.exe', '--help'], cwd=temp, env=env,
                                    capture_output=True, text=True, timeout=30)
             if probe.returncode not in (0, 1) or 'hactool' not in (probe.stdout + probe.stderr).lower():
                 raise RuntimeError('Bundled hactool did not start')
         run([python, '-I', '-c', 'from compression import zstd; import ctypes, ssl, multiprocessing'], temp, env)
-        selected = run([python, '-B', root / 'tools/s2r_paths.py'], temp, env)
+        selected = run([python, '-B', engine / 'tools/s2r_paths.py'], temp, env)
         if str(python) not in selected: raise RuntimeError('Relocated helpers did not select bundled Python')
-        sha = run([dotnet, root / 'tools/nxshader/xlate_bin/dmsh_xlate.dll', '--source-sha'], temp, env).strip()
+        sha = run([dotnet, engine / 'tools/nxshader/xlate_bin/dmsh_xlate.dll', '--source-sha'], temp, env).strip()
         if not re.fullmatch(r'[0-9a-f]{16}', sha): raise RuntimeError('Shader translator did not identify its source')
         cpp = temp / 'probe.cpp'; cpp.write_text('#include <vector>\nint main(){std::vector<int> v{42};return v[0]!=42;}\n')
         probe = temp / ('probe.exe' if win else 'probe')
+        if not win:
+            link = subprocess.run([cc, '-###', cpp, '-lstdc++', '-o', probe], cwd=temp, env=env, capture_output=True,
+                                  text=True, timeout=60)
+            print('gcc link expansion:', link.stdout, link.stderr)
         run([cc, cpp, '-lstdc++', '-o', probe], temp, env)
         run([probe], temp, env)
         source = temp / 'Synthetic [v0] & input.nup'
         write_nup(source, {'Data/raw.bin': b'release fixture'}, {'main': minimal_nso()})
         output = temp / 'Build output'; library = temp / 'library.json'
         launcher = root / ('bin/launcher/SwitchRecompLauncher.exe' if win else 'Switch2RECOMP-turbo.sh')
-        options = ['--root', root] if win else []
+        options = ['--root', engine] if win else []   # the Linux wrapper passes --root itself
         run([launcher, *options, '--library', library, '--smoke-build', source, '--build-output', output], temp, env)
         game, = json.loads(library.read_text())['games']
         if game['buildIncomplete']: raise RuntimeError('Launcher left the build incomplete')
         for suffix in ('.exe' if win else '', '_code.dll' if win else '_code.so', '_data/romfs.nup'):
             if not (output / (game['outputName'] + suffix)).is_file(): raise RuntimeError('Missing build artifact: ' + suffix)
         if (output / (game['outputName'] + '_data/romfs.nup')).read_text().strip() != str(source): raise RuntimeError('Incorrect NUP pointer')
-        runtime = root / ('bin/runtime_win64_win32.exe' if win else 'bin/runtime_linux_x11')
+        runtime = engine / 'bin' / package.runtime_name('windows' if win else 'linux')
         if not win and not os.access(runtime, os.X_OK): raise RuntimeError('Runtime lost its executable permission')
         built_runtime = output / (game['outputName'] + ('.exe' if win else ''))
         if package.digest(runtime) != package.digest(built_runtime): raise RuntimeError('Synthetic build used a different runtime')

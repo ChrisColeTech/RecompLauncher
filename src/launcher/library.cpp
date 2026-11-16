@@ -109,7 +109,7 @@ Toolchain Toolchain::find(const QString& root) {
     t.root = absolute(root);
     const QStringList roots = switchrSearchRoots(t.root);
 #ifdef Q_OS_WIN
-    t.python = pythonTool(t.root, {".venv/Scripts/python.exe", "../../.venv/Scripts/python.exe", "venv/Scripts/python.exe", "../../venv/Scripts/python.exe", "python/python.exe"}, "python.exe");
+    t.python = pythonTool(t.root, {".venv/Scripts/python.exe", "../../.venv/Scripts/python.exe", "venv/Scripts/python.exe", "../../venv/Scripts/python.exe", "python/python.exe", "../../python/python.exe"}, "python.exe");
     for (const auto& search : roots) {
         if (t.compiler.isEmpty()) t.compiler = tool(search, {"gcc/Library/bin/x86_64-w64-mingw32-gcc.exe", "../../third_party/gcc/Library/bin/x86_64-w64-mingw32-gcc.exe", "third_party/gcc/Library/bin/x86_64-w64-mingw32-gcc.exe", "gcc/bin/gcc.exe", "../../third_party/gcc/bin/gcc.exe", "third_party/gcc/bin/gcc.exe", "w64devkit/bin/gcc.exe"});
         if (t.runtime.isEmpty()) t.runtime = tool(search, {"bin/runtime_win64_win32.exe"});
@@ -118,7 +118,7 @@ Toolchain Toolchain::find(const QString& root) {
     if (t.compiler.isEmpty()) t.compiler = QStandardPaths::findExecutable("gcc.exe");
     if (t.dotnet.isEmpty()) t.dotnet = QStandardPaths::findExecutable("dotnet.exe");
 #else
-    t.python = pythonTool(t.root, {".venv/bin/python3", "../../.venv/bin/python3", "venv/bin/python3", "../../venv/bin/python3", "python/bin/python3"}, "python3");
+    t.python = pythonTool(t.root, {".venv/bin/python3", "../../.venv/bin/python3", "venv/bin/python3", "../../venv/bin/python3", "python/bin/python3", "../../python/bin/python3"}, "python3");
     for (const auto& search : roots) {
         if (t.compiler.isEmpty()) t.compiler = tool(search, {"gcc/bin/x86_64-conda-linux-gnu-gcc", "../../third_party/gcc/bin/x86_64-conda-linux-gnu-gcc", "third_party/gcc/bin/x86_64-conda-linux-gnu-gcc", "gcc/bin/gcc"});
         if (t.runtime.isEmpty()) t.runtime = tool(search, {"bin/runtime_linux_x11"});
