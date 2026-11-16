@@ -77,7 +77,7 @@ def required_files(platform):
                    'bin/launcher/vcruntime140.dll', 'bin/launcher/vcruntime140_1.dll'] + [
                    'shader-tools/Library/bin/' + tool + '.exe' for tool in ('spirv-as', 'spirv-val', 'spirv-opt')]
     else:
-        common += [NAME + '.sh', 'fix-gcc.sh', 'python/bin/python3', 'dotnet/dotnet', 'scripts/_env.sh',
+        common += [NAME + '.sh', 'python/bin/python3', 'dotnet/dotnet', 'scripts/_env.sh',
                    'gcc/bin/x86_64-conda-linux-gnu-gcc',
                    'bin/launcher/SwitchRecompLauncher', 'bin/launcher/plugins/platforms/libqxcb.so',
                    'bin/launcher/plugins/platforms/libqoffscreen.so', 'bin/launcher/plugins/imageformats/libqwebp.so',
@@ -204,54 +204,37 @@ def digest(path):
     with path.open('rb') as stream: return hashlib.file_digest(stream, 'sha256').hexdigest()
 
 
-GCC_FIXUP = '''#!/bin/sh
-# The bundled conda GCC bakes absolute paths in while the release is packaged (its sysroot, an rpath inside
-# specs and the linker scripts) and, being GCC, it cannot run from a directory containing spaces. Repoint the
-# baked paths at a space-free alias of this copy and wrap the drivers so every run resolves the alias as
-# --sysroot. Safe to run repeatedly; recreates the alias if /tmp was cleared.
-set -eu
-root=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-gcc="$root/gcc"
-if [ ! -d "$gcc" ]; then exit 0; fi
-home=/tmp/switchrecomp-toolchains
-mkdir -p "$home" 2>/dev/null || true
-hash=$(printf '%s\\n' "$gcc" | cksum | cut -d' ' -f1)
-alias_name="$home/$hash"
-if [ ! -e "$alias_name" ]; then ln -s "$gcc" "$alias_name" 2>/dev/null || true; fi
-cfg="$gcc/bin/x86_64-conda-linux-gnu.cfg"
-have=''
-if [ -f "$cfg" ]; then
-    have=$(sed -n 's|^--sysroot=\\(.*\\)/x86_64-conda-linux-gnu/sysroot$|\\1|p' "$cfg")
-    : > "$cfg"
-fi
-if [ -n "$have" ] && [ "$have" != "$alias_name" ]; then
-    esc=$(printf '%s\\n' "$have" | sed 's/[][\\\\*^$|]/\\\\&/g')
-    rep=$(printf '%s\\n' "$alias_name" | sed 's/[&\\\\|]/\\\\&/g')
-    for f in "$gcc"/lib/gcc/x86_64-conda-linux-gnu/*/specs "$gcc"/x86_64-conda-linux-gnu/lib/ldscripts/*; do
-        if [ -f "$f" ]; then sed -i "s|$esc|$rep|g" "$f"; fi
-    done
-fi
-for name in gcc g++ c++ cpp; do
-    driver="$gcc/bin/x86_64-conda-linux-gnu-$name"
-    if [ -f "$driver" ] && [ ! -f "$driver.bin" ]; then
-        mv "$driver" "$driver.bin"
-        printf '#!/bin/sh\\nset -eu\\ngcc=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)\\nhome=/tmp/switchrecomp-toolchains\\nmkdir -p "$home" 2>/dev/null || true\\na="$home/%s"\\nif [ ! -e "$a" ]; then ln -s "$gcc" "$a" 2>/dev/null || true; fi\\nif [ -e "$a" ]; then exec "$a/bin/x86_64-conda-linux-gnu-%s.bin" --sysroot="$a/x86_64-conda-linux-gnu/sysroot" "$@"; fi\\nexec "$gcc/bin/x86_64-conda-linux-gnu-%s.bin" --sysroot="$gcc/x86_64-conda-linux-gnu/sysroot" "$@"\\n' \\
-            "$hash" "$name" "$name" > "$driver"
-        chmod +x "$driver" "$driver.bin"
-    fi
-done
-'''
+def strip_gcc_rpath(stage):
+    """conda's GCC specs add -rpath <install dir>/lib to every link, recording the packaging machine's path in each
+    binary the bundle builds. Nothing needs it: the game code library links only libc/libm and the launcher puts
+    gcc/lib on LD_LIBRARY_PATH, so drop it. Nothing else needs patching on relocation: GCC derives its sysroot from its own location (spaces
+    included) and never reads the clang-style x86_64-conda-linux-gnu.cfg."""
+    for specs in stage.glob('gcc/lib/gcc/x86_64-conda-linux-gnu/*/specs'):
+        text = specs.read_text()
+        stripped = re.sub(r'%\{!static:-rpath [^}]*\}', '', text)
+        if stripped == text: raise RuntimeError('Unexpected GCC specs layout, no install rpath: ' + str(specs))
+        specs.write_text(stripped)
 
 
 def dereference_symlinks(stage):
     """Toolchain archives carry absolute symlinks (e.g. GCC's libgomp.so recorded against the toolchain's
     original build directory, which never exists on the packaging machine); a relocated bundle cannot follow
-    them, so replace every link with a copy of its target — falling back to the versioned sibling carrying the
+    them, so replace every file link with a copy of its target — falling back to the versioned sibling carrying the
     same basename (standard SONAME layout). Links whose library is not shipped anywhere in the stage (e.g. the
-    dangling OpenMP dev link, unused by this build) are removed; anything else unresolvable is an error."""
+    dangling OpenMP dev link, unused by this build) are removed; anything else unresolvable is an error.
+    Directory links (the GCC sysroot's lib and usr/lib -> lib64, which GCC searches as usr/lib/../lib64) stay
+    links: kept as stored when relative, rewritten relative when absolute, provided they resolve inside the stage."""
     names = {p.name for p in stage.rglob('*') if p.is_file()}
-    for path in [p for p in stage.rglob('*') if p.is_symlink()]:
+    links = [p for p in stage.rglob('*') if p.is_symlink()]
+    directories = {p: p.resolve() for p in links if p.is_dir()}   # before any link below is replaced
+    for path in links:
         target = Path(os.readlink(path))
+        if path in directories:
+            if not directories[path].is_relative_to(stage.resolve()):
+                raise RuntimeError('Directory symlink leaves the release: ' + str(path.relative_to(stage)))
+            if target.is_absolute():
+                path.unlink(); path.symlink_to(os.path.relpath(directories[path], path.parent.resolve()), True)
+            continue
         candidates = [target] if target.is_absolute() else [Path(os.path.normpath(path.parent / target))]
         candidates.append(path.parent / target.name)
         resolved = next((candidate for candidate in candidates if candidate.is_file()), None)
@@ -300,12 +283,11 @@ def main():
         (stage / 'bin/launcher/qt.conf').write_text('[Paths]\nPlugins=plugins\n')
         wrapper = stage / (NAME + '.sh')
         wrapper.write_text('#!/bin/sh\nset -eu\nroot=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)\n'
-                           'if [ -x "$root/fix-gcc.sh" ]; then "$root/fix-gcc.sh"; fi\n'
                            'export LD_LIBRARY_PATH="$root/lib:$root/gcc/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"\n'
                            'export QT_QPA_PLATFORM="${QT_QPA_PLATFORM:-xcb}"\n'
                            'exec "$root/bin/launcher/SwitchRecompLauncher" --root "$root/third_party/Switch2RECOMP" "$@"\n')
         wrapper.chmod(0o755)
-        fixup = stage / 'fix-gcc.sh'; fixup.write_text(GCC_FIXUP); fixup.chmod(0o755)
+        strip_gcc_rpath(stage)
     dereference_symlinks(stage)
     validate_contents(stage, platform)
     (stage / 'build-info.json').write_text(json.dumps(provenance(platform), indent=2) + '\n')

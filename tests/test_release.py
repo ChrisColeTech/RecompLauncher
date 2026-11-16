@@ -131,25 +131,34 @@ class ReleaseChecks(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, 'Non-relocatable'): package.validate_contents(root, 'linux')
             link.unlink()
 
-    @unittest.skipIf(os.name == 'nt', 'Unix shell contract')
-    def test_fix_gcc_script_repoints_packaged_sysroot(self):
-        old = self.root / 'packaging-machine-gcc'; (old / 'bin').mkdir(parents=True)
+    def test_gcc_install_rpath_stripped_from_specs(self):
         root = self.bundle('linux')
-        cfg = root / 'gcc/bin/x86_64-conda-linux-gnu.cfg'; cfg.parent.mkdir(parents=True, exist_ok=True)
-        cfg.write_text('--sysroot=%s/x86_64-conda-linux-gnu/sysroot\n' % old)
         specs = root / 'gcc/lib/gcc/x86_64-conda-linux-gnu/16.2.0/specs'; specs.parent.mkdir(parents=True, exist_ok=True)
-        specs.write_text('*link: -rpath %s/lib\n' % old)
-        driver = root / 'gcc/bin/x86_64-conda-linux-gnu-gcc'
-        driver.write_text('#!/bin/sh\nexit 42\n'); driver.chmod(0o755)
-        script = root / 'fix-gcc.sh'; script.write_text(package.GCC_FIXUP); script.chmod(0o755)
-        subprocess.run(['sh', script], check=True)
-        self.assertEqual(cfg.read_text(), '')                                # never space-split again
-        self.assertIn('/tmp/switchrecomp-toolchains/', specs.read_text())    # baked paths now use the alias
-        wrapper = driver.read_text()
-        self.assertIn('--sysroot="$a/x86_64-conda-linux-gnu/sysroot"', wrapper)
-        self.assertTrue((root / 'gcc/bin/x86_64-conda-linux-gnu-gcc.bin').exists())
-        subprocess.run(['sh', script], check=True)                           # idempotent
-        self.assertEqual(driver.read_text(), wrapper)
+        specs.write_text('*link:\n%{T*}   %{!static:-rpath /home/runner/work/x [y]/gcc/lib}\n\n*lib:\n-lc\n')
+        package.strip_gcc_rpath(root)
+        self.assertEqual(specs.read_text(), '*link:\n%{T*}   \n\n*lib:\n-lc\n')
+        with self.assertRaisesRegex(RuntimeError, 'specs layout'): package.strip_gcc_rpath(root)   # layout changed upstream
+
+    @unittest.skipIf(os.name == 'nt', 'Unix symlink archive contract')
+    def test_directory_symlinks_kept_relative_inside_the_stage(self):
+        # the conda GCC sysroot: lib and usr/lib -> lib64; GCC searches <sysroot>/usr/lib/../lib64 for Scrt1.o
+        root = self.bundle('linux'); sysroot = root / 'gcc/x86_64-conda-linux-gnu/sysroot'
+        (sysroot / 'usr/lib64').mkdir(parents=True); (sysroot / 'usr/lib64/Scrt1.o').write_bytes(b'crt')
+        (sysroot / 'lib64').mkdir(); (root / 'gcc/share/zoneinfo').mkdir(parents=True)
+        (sysroot / 'usr/lib').symlink_to('lib64')                                  # relative, kept as stored
+        (sysroot / 'lib').symlink_to(sysroot / 'lib64')                            # absolute inside: made relative
+        (sysroot / 'usr/share').mkdir(); (sysroot / 'usr/share/zoneinfo').symlink_to('../../../../share/zoneinfo')
+        package.dereference_symlinks(root)
+        self.assertEqual(os.readlink(sysroot / 'usr/lib'), 'lib64')
+        self.assertEqual(os.readlink(sysroot / 'lib'), 'lib64')
+        self.assertEqual(os.readlink(sysroot / 'usr/share/zoneinfo'), '../../../../share/zoneinfo')
+        self.assertEqual((sysroot / 'usr/lib/../lib64/Scrt1.o').read_bytes(), b'crt')
+        package.validate_contents(root, 'linux')
+        moved = self.root / 'relocated [x]'; root.rename(moved)                    # still resolves after moving
+        self.assertEqual((moved / 'gcc/x86_64-conda-linux-gnu/sysroot/usr/lib/Scrt1.o').read_bytes(), b'crt')
+        outside = self.root / 'outside-dir'; outside.mkdir()
+        (moved / 'gcc/escape').symlink_to(outside)
+        with self.assertRaisesRegex(RuntimeError, 'Directory symlink leaves'): package.dereference_symlinks(moved)
 
     @unittest.skipIf(os.name == 'nt', 'Unix symlink archive contract')
     def test_dereference_replaces_nonrelocatable_links_with_target_copies(self):

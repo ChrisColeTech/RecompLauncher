@@ -62,7 +62,7 @@ spaces and brackets, outside the checkout. With a minimal tool search path, the 
    Checks required runtime headers, shader helpers, Qt plugins, licenses, source archives, and provenance.
    Rejects personal data, development venvs, and broken, absolute, or escaping symlinks.
 2. Starts bundled Python/zstd, .NET, and SPIRV tools.
-3. Compiles and runs a C++ program with bundled GCC.
+3. Compiles, links and runs a C++ program with bundled GCC, whose sysroot must resolve inside the bundle.
 4. Builds a synthetic NUP through the deployed Qt launcher.
 5. Confirms the copied runtime matches the packaged binary, checks the Vulkan setting and NUP pointer,
    imports that build twice without duplicating the library entry, then imports the staged shader modules
@@ -71,6 +71,10 @@ spaces and brackets, outside the checkout. With a minimal tool search path, the 
 Packaging requires linked VP9 and NVN telemetry markers in both native runtimes and Sony HID loader markers
 on Windows. The clean workflow builds the OpenGL/NVN desktop runtime, its audio mixer, and VP9 decoder.
 Optional Eden, OpenH264, Opus, and SPIRV-Cross/LSFG static libraries are not built by this workflow.
+Packaging replaces file symlinks with copies of their targets but keeps directory symlinks that stay inside
+the bundle as relative links: GCC finds `Scrt1.o` through its sysroot's `usr/lib -> lib64`. The bundled GCC
+needs no fixup after extraction, because it derives its sysroot from its own location. Packaging only removes the
+`-rpath` to the packaging machine that conda's specs add to every link.
 
 Both jobs must pass before publishing. Pushes to `main` and manual all-platform runs on `main`
 create a release tagged `launcher-<run number>-<attempt>`, targeting the exact tested commit.
