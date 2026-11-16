@@ -3,6 +3,7 @@
 #include "theme.h"
 #include <QApplication>
 #include <QPainter>
+#include <QPainterPath>
 #include <QPalette>
 #include <QProxyStyle>
 #include <QStyleFactory>
@@ -39,12 +40,26 @@ void Theme::apply(QApplication& app,const QString& mode,const QString& accent){
 }
 // fixed app icon (scripts/make-icon.py); the same image is embedded in the Windows exe via app.rc
 QIcon Theme::appIcon(){ return QIcon(":/icons/app.png"); }
+// Same geometry as scripts/make-icon.py (unit square), but the controller is cut out so the title bar shows through.
+QPixmap Theme::accentGlyph(const QColor& accent,int size,qreal dpr){
+    QPixmap image(QSize(size,size)*dpr);image.setDevicePixelRatio(dpr);image.fill(Qt::transparent);
+    QPainter p(&image);p.setRenderHint(QPainter::Antialiasing);p.setPen(Qt::NoPen);p.scale(size,size);
+    auto rounded=[&](qreal x1,qreal y1,qreal x2,qreal y2,qreal r){QPainterPath path;path.addRoundedRect(QRectF(x1,y1,x2-x1,y2-y1),r,r);p.drawPath(path);};
+    p.setBrush(accent);rounded(0,0,1,1,.22);
+    p.setCompositionMode(QPainter::CompositionMode_Clear);p.setBrush(Qt::black);
+    rounded(.11,.30,.89,.64,.17);for(qreal cx:{.255,.745})p.drawEllipse(QPointF(cx,.54),.16,.16);
+    p.setCompositionMode(QPainter::CompositionMode_SourceOver);p.setBrush(accent);
+    const qreal cx=.295,cy=.465,arm=.105,w=.044;rounded(cx-arm,cy-w,cx+arm,cy+w,w*.5);rounded(cx-w,cy-arm,cx+w,cy+arm,w*.5);
+    for(const QPointF& b:{QPointF(.665,.51),QPointF(.75,.425)})p.drawEllipse(b,.052,.052);
+    return image;
+}
 QString Theme::stylesheet(const Colors& c){
     QString css=QStringLiteral(R"(
 QWidget { color: @text; font-family: 'Segoe UI'; font-size: 13px; }
 QMainWindow, QDialog { background: @surface; }
 QMenuBar { background: @surface; padding: 2px 5px; border-bottom: 1px solid @border; }
-QMenuBar::item { padding: 4px 10px; background: transparent; }
+QWidget#TitleBar QMenuBar { background: transparent; padding: 0px; border: none; }
+QMenuBar::item { padding: 4px 10px; background: transparent; border-radius: 5px; }
 QMenuBar::item:selected, QMenu::item:selected { background: @selected; }
 QMenu { background: @raised; border: 1px solid @border; padding: 5px; }
 QMenu::item { padding: 7px 28px; }
