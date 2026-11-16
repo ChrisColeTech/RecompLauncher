@@ -76,7 +76,7 @@ def check_linux_loader(root, env):
     for binary in (root / package.launcher_name('linux'), root / 'plugins/platforms/libqxcb.so'):
         output = run(['ldd', binary], root, env)
         if 'not found' in output: raise RuntimeError('Unresolved library without LD_LIBRARY_PATH:\n' + output)
-        qt = re.findall(r'^\s*(libQt6\S+) => (/\S+)', output, re.M)
+        qt = re.findall(r'^\s*(libQt6\S+) => (/.+?) \(0x[0-9a-f]+\)$', output, re.M)   # paths contain spaces here
         if not qt: raise RuntimeError('No Qt libraries resolved for ' + str(binary))
         for name, path in qt:
             if not Path(path).resolve().is_relative_to(root.resolve()): raise RuntimeError(name + ' loaded from outside the release: ' + path)
