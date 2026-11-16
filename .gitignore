@@ -1,0 +1,15 @@
+# Build outputs and local state
+.venv/
+build/
+bin/
+logs/
+dist/
+__pycache__/
+*.py[cod]
+
+# Portable toolchain is reproducible via the engine's tool/get_deps.py
+third_party/gcc/
+
+# Engine build scratch
+third_party/Switch2RECOMP/bin/
+third_party/Switch2RECOMP/build/
