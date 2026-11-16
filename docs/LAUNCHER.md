@@ -4,8 +4,7 @@ It is a static recompiler and desktop build/library utility, not an emulator pro
 game dumps, build them, then launch the finished games from the same library. No per-game desktop shortcuts
 are needed. The library is saved automatically and is restored the next time you open the launcher.
 
-Start with the [screenshot walkthrough](../README.md#workflow--add-build-play). Its images are captures of the actual
-Qt widgets using demonstration data, not game compatibility results. No games, keys or firmware are included.
+Start with the [README walkthrough](../README.md#add-build-play). No games, keys or firmware are included.
 
 ## Start it
 
@@ -220,16 +219,12 @@ environment propagation. The documentation fixture below adds actual Window/dial
 
 ## Screenshot capture
 
-The PNGs in [`docs/images/launcher/`](images/launcher/) are captures of the production Qt widgets from the
-running application. Most are taken with the launcher's own `--screenshot` flag, which grabs the window (or the
-active dialog/popout) with `QWidget::grab()` and exits: `--demo` seeds a non-persistent preview library,
-`--show-filters`/`--show-properties`/`--show-console` open the matching panes, and `--preview-theme`/`--list-view`
-switch appearance and layout. The library and build-in-progress shots use a real developer library built from
-the synthetic test packages described below.
-
-All names, package headers, and native artifacts in the demonstration entries are synthetic data. The **Play**
-card represents artifact detection, not an executed game. The build-dock capture is a real build of a synthetic
-NUP taken while compilation was running.
+The README images in [`docs/images/launcher/`](images/launcher/) are captures of the running launcher's
+window (Win32 `PrintWindow`) with a real library: `library.jpg` is the gallery, `building.jpg` a real game
+build caught while it was generating C. The launcher also has its own `--screenshot <png>` flag, which grabs
+the window (or the active dialog/popout) with `QWidget::grab()` and exits; `--demo` seeds a non-persistent
+preview library, and `--show-filters`/`--show-properties`/`--show-console`, `--preview-theme` and `--list-view`
+open panes or switch appearance for scripted captures.
 
 Verification for these docs (November 15, 2026):
 
