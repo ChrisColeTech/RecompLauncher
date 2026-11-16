@@ -13,3 +13,6 @@ third_party/gcc/
 # Engine build scratch
 third_party/Switch2RECOMP/bin/
 third_party/Switch2RECOMP/build/
+
+# written into the checkout by aqtinstall / install-qt-action
+aqtinstall.log
