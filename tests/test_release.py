@@ -24,7 +24,9 @@ def module(name, path):
 package = module('package_release', 'scripts/package-release.py')
 smoke = module('smoke_release', 'scripts/smoke-release.py')
 dependencies = module('release_dependencies', 'scripts/release-deps.py')
-ENGINE = package.ENGINE_DIR   # the engine's place inside a bundle
+ENGINE = package.RELEASE_ENGINE      # engine/ inside a release
+TOOLCHAIN = package.TOOLCHAIN        # toolchain/
+LEGAL = package.LEGAL                # legal/
 
 
 class ReleaseChecks(unittest.TestCase):
@@ -37,31 +39,54 @@ class ReleaseChecks(unittest.TestCase):
         root = self.root / platform; root.mkdir()
         for name in package.required_files(platform):
             path = root / name; path.parent.mkdir(parents=True, exist_ok=True); path.write_bytes(b'fixture')
-        for name in ('licenses/qt/qtbase', 'licenses/qt/qtimageformats', 'licenses/qt/qtsvg', 'gcc/licenses', 'shader-tools/licenses'):
+        for name in ('legal/licenses/qt/qtbase', 'legal/licenses/qt/qtimageformats', 'legal/licenses/qt/qtsvg',
+                     'toolchain/gcc/licenses', 'toolchain/shader-tools/licenses'):
             path = root / name; path.mkdir(parents=True, exist_ok=True); (path / 'LICENSE').write_text('fixture')
         runtime = root / ENGINE / 'bin' / package.runtime_name(platform)
         runtime.write_bytes(b'WebM Project VP9 Decoder\0frame telemetry:\0hid.dll\0setupapi.dll')
-        vpx = root / ENGINE / package.vp9_path(platform)
-        manifest = {'platform': platform, 'downloads': {'libvpx': {'sha256': package.digest(vpx), 'sources': {
-            p.name: {'sha256': package.digest(p)} for p in (root / 'sources').glob('libvpx*')}}}}
-        (root / 'dependency-manifest.json').write_text(json.dumps(manifest))
+        manifest = {'platform': platform, 'downloads': {'libvpx': {'sha256': '0' * 64, 'sources': {
+            p.name: {'sha256': package.digest(p)} for p in (root / LEGAL / 'sources').glob('libvpx*')}}}}
+        (root / LEGAL / 'dependency-manifest.json').write_text(json.dumps(manifest))
         return root
 
     def sums(self, root):
-        (root / 'SHA256SUMS').write_text(''.join(package.digest(p) + '  ' + p.relative_to(root).as_posix() + '\n'
-            for p in sorted(root.rglob('*')) if p.is_file() and p.name != 'SHA256SUMS'))
+        sums = root / LEGAL / 'SHA256SUMS'
+        sums.write_text(''.join(package.digest(p) + '  ' + p.relative_to(root).as_posix() + '\n'
+                                for p in sorted(root.rglob('*')) if p.is_file() and p != sums))
 
     def test_complete_bundles_and_missing_new_files(self):
         for platform in ('windows', 'linux'):
             root = self.bundle(platform)
             package.validate_contents(root, platform)
-            for name in [(ENGINE / n).as_posix() for n in ('runtime/controller_sony_win32.h', 'runtime/nvn/vk/vk_perf.c',
-                         'runtime/nvn/vk/vk_perf.h', 'tools/nxshader/s2r_paths.py',
-                         'tools/nxshader/xlate_bin/dmsh_xlate.runtimeconfig.json', 'NOTICE.txt', 'bin/' + package.runtime_name(platform))] + [
-                         'src/recomp_cli.py', 'docs/RELEASES.md', 'sources/libvpx_1.14.0-1ubuntu2.3.debian.tar.xz']:
+            for name in [(ENGINE / n).as_posix() for n in ('runtime/cpu.h', 'runtime/cpu_helpers.c', 'runtime/nvn/gfx/dmsh_abi.h',
+                         'recomp_cli.py', 'nup.py', 'tools/nxshader/s2r_paths.py',
+                         'tools/nxshader/xlate_bin/dmsh_xlate.runtimeconfig.json', 'bin/' + package.runtime_name(platform))] + [
+                         package.launcher_name(platform), 'legal/NOTICE.txt', 'legal/licenses/libvpx/LICENSE-libvpx.txt',
+                         'legal/sources/libvpx_1.14.0-1ubuntu2.3.debian.tar.xz', 'toolchain/dotnet/LICENSE.txt']:
                 path = root / name; data = path.read_bytes(); path.unlink()
                 with self.assertRaises(FileNotFoundError, msg=name): package.validate_contents(root, platform)
                 path.write_bytes(data)
+
+    def test_layout_rejects_sources_and_developer_clutter(self):
+        # what the old repository-mirror bundle shipped: none of it belongs in a release
+        clutter = {'windows': ['engine/runtime/gpu.c', 'engine/runtime/edenvk/deps/zstd/lib/zstd.h', 'engine/tests/test_nup.py',
+                               'engine/docs/THIRD_PARTY.md', 'engine/tool/get_deps.py', 'engine/tools/s2r_paths.py',
+                               'engine/tools/build_nvn.py', 'engine/runtime/vp9/win/libvpx.a', 'engine/tools/nxshader/run_split.py',
+                               'engine/LICENSE.txt', 'src/recomp_cli.py', 'scripts/_python.bat', '.gitignore', 'RecompLauncher.cmd',
+                               'vc_redist.x64.exe', 'third_party/Switch2RECOMP/switchrecomp.py', 'bin/launcher/RecompLauncher.exe',
+                               'docs/RELEASES.md', 'SwitchRecompLauncher.exe'],
+                   'linux': ['engine/runtime/backend_x11.c', 'engine/tools/hactool/hactool.exe', 'RecompLauncher.sh',
+                             'scripts/_env.sh', 'gcc/bin/gcc', 'README.md', 'bin/launcher/RecompLauncher']}
+        for platform, names in clutter.items():
+            root = self.bundle(platform); package.validate_contents(root, platform)
+            for name in names:
+                path = root / name; path.parent.mkdir(parents=True, exist_ok=True); path.write_bytes(b'clutter')
+                with self.assertRaisesRegex(RuntimeError, 'Unexpected top-level|outside the release allowlist', msg=name):
+                    package.validate_contents(root, platform)
+                path.unlink()
+                while path.parent != root and not list(path.parent.iterdir()):
+                    path = path.parent; path.rmdir()
+            package.validate_contents(root, platform)
 
     def test_runtime_requires_vp9_nvn_telemetry_and_sony(self):
         root = self.bundle('windows'); runtime = root / ENGINE / 'bin/runtime_win64_win32.exe'; data = runtime.read_bytes()
@@ -69,13 +94,19 @@ class ReleaseChecks(unittest.TestCase):
             runtime.write_bytes(data.replace(marker, b''))
             with self.assertRaisesRegex(RuntimeError, 'Native runtime feature'): package.validate_contents(root, 'windows')
         runtime.write_bytes(data)
-        (root / ENGINE / 'runtime/vp9/win/libvpx.a').write_bytes(b'wrong target library')
-        with self.assertRaisesRegex(RuntimeError, 'provenance'): package.validate_contents(root, 'windows')
+        # the linked libvpx archive is a checkout build input: it must match the provenance the release records
+        engine = self.root / 'checkout engine'; lib = engine / package.vp9_path('windows')
+        lib.parent.mkdir(parents=True); lib.write_bytes(b'pinned archive')
+        manifest = root / LEGAL / 'dependency-manifest.json'; record = json.loads(manifest.read_text())
+        record['downloads']['libvpx']['sha256'] = package.digest(lib); manifest.write_text(json.dumps(record))
+        package.verify_vp9_provenance(engine, manifest, 'windows')
+        lib.write_bytes(b'wrong target library')
+        with self.assertRaisesRegex(RuntimeError, 'provenance'): package.verify_vp9_provenance(engine, manifest, 'windows')
 
     def test_private_inputs_rejected(self):
         root = self.bundle('windows')
-        for name in ('docs/library.json', 'tools/python.path', 'runtime/prod.keys', 'runtime/cache.NSP',
-                     'tools/saves/private.dat', '.venv/Scripts/python.exe', 'logs/session.txt', 'shader_cache/cache.bin'):
+        for name in ('legal/library.json', 'engine/tools/nxshader/python.path', 'engine/runtime/prod.keys', 'engine/runtime/cache.NSP',
+                     'toolchain/saves/private.dat', 'toolchain/.venv/Scripts/python.exe', 'logs/session.txt', 'shader_cache/cache.bin'):
             path = root / name; path.parent.mkdir(parents=True, exist_ok=True); path.write_bytes(b'private')
             with self.assertRaisesRegex(RuntimeError, 'Personal/generated'): package.validate_contents(root, 'windows')
             path.unlink()
@@ -84,11 +115,11 @@ class ReleaseChecks(unittest.TestCase):
 
     def test_manifest_rejects_extra_missing_changed_and_duplicate_files(self):
         root = self.bundle('linux'); self.sums(root); smoke.verify_manifest(root)
-        manifest = root / 'SHA256SUMS'; original = manifest.read_text()
+        manifest = root / LEGAL / 'SHA256SUMS'; original = manifest.read_text()
         extra = root / 'extra.txt'; extra.write_text('unlisted')
         with self.assertRaisesRegex(RuntimeError, 'exactly'): smoke.verify_manifest(root)
         extra.unlink()
-        notice = root / ENGINE / 'NOTICE.txt'; notice.unlink()
+        notice = root / LEGAL / 'NOTICE.txt'; notice.unlink()
         with self.assertRaises(FileNotFoundError): smoke.verify_manifest(root)
         notice.write_text('changed')
         with self.assertRaisesRegex(RuntimeError, 'Checksum'): smoke.verify_manifest(root)
@@ -126,14 +157,14 @@ class ReleaseChecks(unittest.TestCase):
     @unittest.skipIf(os.name == 'nt', 'Unix symlink archive contract')
     def test_external_and_broken_symlinks_rejected(self):
         root = self.bundle('linux'); link = root / 'outside'
-        for target in (self.root / 'missing', self.root, root / ENGINE / 'NOTICE.txt'):
+        for target in (self.root / 'missing', self.root, root / LEGAL / 'NOTICE.txt'):
             link.symlink_to(target)
             with self.assertRaisesRegex(RuntimeError, 'Non-relocatable'): package.validate_contents(root, 'linux')
             link.unlink()
 
     def test_gcc_install_rpath_stripped_from_specs(self):
         root = self.bundle('linux')
-        specs = root / 'gcc/lib/gcc/x86_64-conda-linux-gnu/16.2.0/specs'; specs.parent.mkdir(parents=True, exist_ok=True)
+        specs = root / 'toolchain/gcc/lib/gcc/x86_64-conda-linux-gnu/16.2.0/specs'; specs.parent.mkdir(parents=True, exist_ok=True)
         specs.write_text('*link:\n%{T*}   %{!static:-rpath /home/runner/work/x [y]/gcc/lib}\n\n*lib:\n-lc\n')
         package.strip_gcc_rpath(root)
         self.assertEqual(specs.read_text(), '*link:\n%{T*}   \n\n*lib:\n-lc\n')
@@ -142,9 +173,9 @@ class ReleaseChecks(unittest.TestCase):
     @unittest.skipIf(os.name == 'nt', 'Unix symlink archive contract')
     def test_directory_symlinks_kept_relative_inside_the_stage(self):
         # the conda GCC sysroot: lib and usr/lib -> lib64; GCC searches <sysroot>/usr/lib/../lib64 for Scrt1.o
-        root = self.bundle('linux'); sysroot = root / 'gcc/x86_64-conda-linux-gnu/sysroot'
+        root = self.bundle('linux'); sysroot = root / 'toolchain/gcc/x86_64-conda-linux-gnu/sysroot'
         (sysroot / 'usr/lib64').mkdir(parents=True); (sysroot / 'usr/lib64/Scrt1.o').write_bytes(b'crt')
-        (sysroot / 'lib64').mkdir(); (root / 'gcc/share/zoneinfo').mkdir(parents=True)
+        (sysroot / 'lib64').mkdir(); (root / 'toolchain/gcc/share/zoneinfo').mkdir(parents=True)
         (sysroot / 'usr/lib').symlink_to('lib64')                                  # relative, kept as stored
         (sysroot / 'lib').symlink_to(sysroot / 'lib64')                            # absolute inside: made relative
         (sysroot / 'usr/share').mkdir(); (sysroot / 'usr/share/zoneinfo').symlink_to('../../../../share/zoneinfo')
@@ -155,55 +186,74 @@ class ReleaseChecks(unittest.TestCase):
         self.assertEqual((sysroot / 'usr/lib/../lib64/Scrt1.o').read_bytes(), b'crt')
         package.validate_contents(root, 'linux')
         moved = self.root / 'relocated [x]'; root.rename(moved)                    # still resolves after moving
-        self.assertEqual((moved / 'gcc/x86_64-conda-linux-gnu/sysroot/usr/lib/Scrt1.o').read_bytes(), b'crt')
+        self.assertEqual((moved / 'toolchain/gcc/x86_64-conda-linux-gnu/sysroot/usr/lib/Scrt1.o').read_bytes(), b'crt')
         outside = self.root / 'outside-dir'; outside.mkdir()
-        (moved / 'gcc/escape').symlink_to(outside)
+        (moved / 'toolchain/gcc/escape').symlink_to(outside)
         with self.assertRaisesRegex(RuntimeError, 'Directory symlink leaves'): package.dereference_symlinks(moved)
 
     @unittest.skipIf(os.name == 'nt', 'Unix symlink archive contract')
     def test_dereference_replaces_nonrelocatable_links_with_target_copies(self):
         root = self.bundle('linux')
-        (root / 'gcc/lib').mkdir(parents=True, exist_ok=True)
-        real = root / 'gcc/lib/libgomp.so.1.0.0'; real.write_bytes(b'gomp')
-        (root / 'gcc/lib/libgomp.so').symlink_to(real)             # relative, inside the stage
-        (root / 'gcc/lib/absolute.so').symlink_to(self.root / 'outside-target')
+        (root / 'toolchain/gcc/lib').mkdir(parents=True, exist_ok=True)
+        real = root / 'toolchain/gcc/lib/libgomp.so.1.0.0'; real.write_bytes(b'gomp')
+        (root / 'toolchain/gcc/lib/libgomp.so').symlink_to(real)             # relative, inside the stage
+        (root / 'toolchain/gcc/lib/absolute.so').symlink_to(self.root / 'outside-target')
         (self.root / 'outside-target').write_bytes(b'absolute')
-        (root / 'gcc/lib/gcc-ghost.so').symlink_to(Path('/never-existed/lib/gcc-ghost.so.1.0.0'))  # toolchain-build path
-        (root / 'gcc/lib/gcc-ghost.so.1.0.0').write_bytes(b'ghost')
+        (root / 'toolchain/gcc/lib/gcc-ghost.so').symlink_to(Path('/never-existed/lib/gcc-ghost.so.1.0.0'))  # toolchain-build path
+        (root / 'toolchain/gcc/lib/gcc-ghost.so.1.0.0').write_bytes(b'ghost')
         package.dereference_symlinks(root)
-        self.assertFalse((root / 'gcc/lib/libgomp.so').is_symlink())
-        self.assertEqual((root / 'gcc/lib/libgomp.so').read_bytes(), b'gomp')
-        self.assertFalse((root / 'gcc/lib/absolute.so').is_symlink())
-        self.assertEqual((root / 'gcc/lib/absolute.so').read_bytes(), b'absolute')
-        self.assertFalse((root / 'gcc/lib/gcc-ghost.so').is_symlink())
-        self.assertEqual((root / 'gcc/lib/gcc-ghost.so').read_bytes(), b'ghost')
+        self.assertFalse((root / 'toolchain/gcc/lib/libgomp.so').is_symlink())
+        self.assertEqual((root / 'toolchain/gcc/lib/libgomp.so').read_bytes(), b'gomp')
+        self.assertFalse((root / 'toolchain/gcc/lib/absolute.so').is_symlink())
+        self.assertEqual((root / 'toolchain/gcc/lib/absolute.so').read_bytes(), b'absolute')
+        self.assertFalse((root / 'toolchain/gcc/lib/gcc-ghost.so').is_symlink())
+        self.assertEqual((root / 'toolchain/gcc/lib/gcc-ghost.so').read_bytes(), b'ghost')
         package.validate_contents(root, 'linux')                   # the fixed tree now validates
-        (root / 'gcc/lib/libopenmp.so').symlink_to(Path('/never/libopenmp.so'))  # dev link, library not shipped
+        (root / 'toolchain/gcc/lib/libopenmp.so').symlink_to(Path('/never/libopenmp.so'))  # dev link, library not shipped
         package.dereference_symlinks(root)
-        self.assertFalse((root / 'gcc/lib/libopenmp.so').exists())  # dangling dev link removed
+        self.assertFalse((root / 'toolchain/gcc/lib/libopenmp.so').exists())  # dangling dev link removed
         package.validate_contents(root, 'linux')
-        (root / 'gcc/lib/suspicious.so').symlink_to(self.root / 'missing-dir/NOTICE.txt')  # basename IS shipped
+        (root / 'toolchain/gcc/lib/suspicious.so').symlink_to(self.root / 'missing-dir/NOTICE.txt')  # basename IS shipped
         with self.assertRaisesRegex(RuntimeError, 'unreadable target'): package.dereference_symlinks(root)
 
-    def test_source_allowlist_covers_checkout_and_engine_submodule_but_not_personal_data(self):
-        checkout = self.root / 'checkout'; engine = checkout / ENGINE
-        launcher_names = ['src/recomp_cli.py', 'scripts/_python.bat', 'docs/RELEASES.md', 'third_party/Switch2RECOMP',
-                          'bin/launcher/SwitchRecompLauncher.exe', 'library.json', 'logs/build.txt']
-        engine_names = ['switchrecomp.py', 'runtime/controller_sony.h', 'runtime/nvn/vk/vk_perf.c', 'tools/nxshader/s2r_paths.py',
-                        'scripts/build-from-nup.bat', 'tools/library.json', 'runtime/prod.keys', '.venv/Scripts/python.exe',
-                        'games/Game.exe', 'performance.txt']
-        for base, names in ((checkout, launcher_names[:3] + launcher_names[4:]), (engine, engine_names)):
-            for name in names:
-                p = base / name; p.parent.mkdir(parents=True, exist_ok=True); p.touch()
-        def listing(command, cwd):   # git ls-files never descends into the submodule, it only lists its gitlink
-            return '\0'.join(engine_names if Path(cwd) == engine else launcher_names).encode()
-        with patch.object(package, 'ROOT', checkout), patch.object(package, 'ENGINE', engine), \
-             patch.object(package.subprocess, 'check_output', side_effect=listing):
-            self.assertEqual({p.as_posix() for p in package.source_files()},
-                             set(launcher_names[:3]) | {(ENGINE / n).as_posix() for n in engine_names[:4]})
+    def test_engine_allowlist_takes_tracked_files_only(self):
+        engine = self.root / 'engine checkout'
+        wanted = [p.replace('*', 'dmsh_xlate.dll') for p in package.ENGINE_FILES]
+        unwanted = ['runtime/gpu.c', 'runtime/rt.h', 'runtime/edenvk/deps/zstd/lib/zstd.h', 'tests/test_nup.py', 'docs/README.md',
+                    'tool/get_deps.py', 'tools/s2r_paths.py', 'tools/build_nvn.py', 'tools/nxshader/run_split.py',
+                    'runtime/vp9/win/libvpx.a', 'brt.py', 'tools_sym.py', 'tools/nxshader/__pycache__/nxs_live.cpython-314.pyc',
+                    'tools/nxshader/library.json', 'runtime/prod.keys']
+        for name in wanted + unwanted + ['untracked.py']:
+            p = engine / name; p.parent.mkdir(parents=True, exist_ok=True); p.touch()
+        listing = lambda command, cwd: '\0'.join(wanted + unwanted).encode()   # what git ls-files reports as tracked
+        with patch.object(package, 'ENGINE', engine), patch.object(package.subprocess, 'check_output', side_effect=listing):
+            self.assertEqual({p.as_posix() for p in package.engine_files()}, set(wanted))
+        (engine / 'nup.py').unlink(); wanted.remove('nup.py')
+        with patch.object(package, 'ENGINE', engine), patch.object(package.subprocess, 'check_output', side_effect=listing):
+            with self.assertRaisesRegex(FileNotFoundError, 'not tracked: nup.py'): list(package.engine_files())
         (engine / 'switchrecomp.py').unlink()
-        with patch.object(package, 'ROOT', checkout), patch.object(package, 'ENGINE', engine):
-            with self.assertRaisesRegex(FileNotFoundError, 'submodule'): list(package.source_files())
+        with patch.object(package, 'ENGINE', engine):
+            with self.assertRaisesRegex(FileNotFoundError, 'submodule'): list(package.engine_files())
+
+    def test_launcher_folder_allowlist(self):
+        deploy = self.root / 'deploy'
+        for name in ('RecompLauncher.exe', 'Qt6Core.dll', 'platforms/qwindows.dll', 'imageformats/qwebp.dll',
+                     'vc_redist.x64.exe', 'SwitchRecompLauncher.exe', 'launcher.pdb', 'library.json'):
+            p = deploy / name; p.parent.mkdir(parents=True, exist_ok=True); p.touch()
+        self.assertEqual({p.as_posix() for p in package.launcher_files(deploy, 'windows')},
+                         {'RecompLauncher.exe', 'Qt6Core.dll', 'platforms/qwindows.dll', 'imageformats/qwebp.dll'})
+        (deploy / 'RecompLauncher').touch()
+        self.assertEqual([p.as_posix() for p in package.launcher_files(deploy, 'linux')], ['RecompLauncher'])
+        (deploy / 'RecompLauncher.exe').unlink()
+        with self.assertRaises(FileNotFoundError): list(package.launcher_files(deploy, 'windows'))
+
+    def test_cli_finds_engine_in_release_and_checkout(self):
+        cli = module('recomp_cli', 'src/recomp_cli.py')
+        self.assertEqual(Path(cli.engine_dir()), ROOT / 'third_party' / 'Switch2RECOMP')   # checkout: src/ -> third_party
+        release = self.root / 'release' / 'engine'; release.mkdir(parents=True)
+        for name in ('recomp_cli.py', 'switchrecomp.py'): (release / name).write_text((ROOT / 'src/recomp_cli.py').read_text())
+        shipped = module('shipped_cli', release / 'recomp_cli.py')
+        self.assertEqual(Path(shipped.engine_dir()), release)                                # release: beside itself
 
     def test_runtime_build_links_native_archive_and_vp9_on_both_platforms(self):
         import switchrecomp as compiler

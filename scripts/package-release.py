@@ -1,12 +1,17 @@
 #!/usr/bin/env python3
 # RecompLauncher - native game library and build launcher.
 # The vendored Switch2RECOMP engine keeps its AGPL-3.0 notices under third_party/Switch2RECOMP.
-"""Stage an allowlisted, relocatable toolkit and archive it with a SHA-256 manifest.
+"""Stage an allowlisted, relocatable end-user release and archive it with a SHA-256 manifest.
 
-The bundle mirrors the repository layout, so the launcher finds everything the same way it does in a checkout:
-the launcher, src/recomp_cli.py and the shared tools (python, gcc, dotnet, shader-tools) at the root, and the
-engine submodule with its runtime, VP9 archive and hactool under third_party/Switch2RECOMP."""
+Layout (the launcher finds engine/ and toolchain/ beside its own executable):
+  RecompLauncher(.exe)  the Qt launcher with its Qt/MSVC DLLs and plugin folders (Linux: lib/, plugins/, qt.conf)
+  engine/               only what a game build reads: the recompiler modules, recomp_cli.py, the prebuilt native
+                        runtime, the runtime header/helper the generated C includes, the shader helper (+ hactool)
+  toolchain/            python, gcc, dotnet, shader-tools
+  legal/                engine LICENSE/NOTICE, third-party licenses, corresponding sources, provenance, SHA256SUMS
+The complete source (launcher + engine at the pinned commit) is the separate source archive of each release."""
 import argparse
+import fnmatch
 import hashlib
 import json
 import os
@@ -18,15 +23,24 @@ import tarfile
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
-NAME = 'RecompLauncher'   # archive, top-level folder and start-script name
-ENGINE_DIR = Path('third_party/Switch2RECOMP')   # same relative path in the checkout and in the bundle
-ENGINE = ROOT / ENGINE_DIR
-LAUNCHER_DIRS = {'src', 'scripts', 'docs', 'tests', '.github'}
-LAUNCHER_FILES = {'README.md', '.gitattributes', '.gitignore', '.gitmodules'}
-ENGINE_DIRS = {'runtime', 'tools', 'tool', 'tests', 'docs'}
-ENGINE_FILES = {'a64.py', 'brt.py', 'codegen.py', 'nup.py', 'nsp.py', 'nxloader.py', 'switchrecomp.py', 'tools_sym.py',
-                'LICENSE.txt', 'NOTICE.txt', 'CHANGELOG.txt', 'README.md', 'README.txt', 'DEVELOPER_GUIDE.md',
-                'REGRESSION.md', '.gitattributes', '.gitignore'}
+NAME = 'RecompLauncher'   # archive, top-level folder and launcher executable name
+ENGINE = ROOT / 'third_party/Switch2RECOMP'   # engine submodule in the checkout
+RELEASE_ENGINE, TOOLCHAIN, LEGAL = Path('engine'), Path('toolchain'), Path('legal')
+TOOLS = ('python', 'gcc', 'dotnet', 'shader-tools')
+# Engine files a game build reads, as tracked in the submodule; everything else there builds the runtime or is
+# developer tooling. switchrecomp.py imports nxloader + codegen; codegen imports a64; nxloader imports nup + nsp
+# (packages, hactool). Generated C is compiled with -I runtime and includes only cpu.h and cpu_helpers.c, which
+# also key the object cache. copy_nxshader() stages tools/nxshader into every game, plus runtime/nvn/gfx/dmsh_abi.h.
+ENGINE_FILES = ('switchrecomp.py', 'nxloader.py', 'codegen.py', 'a64.py', 'nup.py', 'nsp.py',
+                'runtime/cpu.h', 'runtime/cpu_helpers.c', 'runtime/nvn/gfx/dmsh_abi.h',
+                'tools/nxshader/nxs_live.py', 'tools/nxshader/nxs_front.py', 'tools/nxshader/nxs_cache.py',
+                'tools/nxshader/nxshader.py', 'tools/nxshader/nxs_spv.py', 'tools/nxshader/nxs_refl.py',
+                'tools/nxshader/dmsh_abi.py', 'tools/nxshader/dmsh_ampere.py', 'tools/nxshader/dmsh_meshstage.py',
+                'tools/nxshader/s2r_paths.py', 'tools/nxshader/xlate_bin/*')
+# engine notices that move to legal/ (the runtime links libvpx statically, so its BSD notice ships with it)
+ENGINE_LEGAL = {'LICENSE.txt': 'LICENSE.txt', 'NOTICE.txt': 'NOTICE.txt', 'docs/THIRD_PARTY.md': 'THIRD_PARTY.md',
+                'runtime/vp9/LICENSE-libvpx.txt': 'licenses/libvpx/LICENSE-libvpx.txt',
+                'runtime/vp9/PATENTS-libvpx.txt': 'licenses/libvpx/PATENTS-libvpx.txt'}
 JUNK = {'__pycache__', '_downloads', '.git', '.venv', 'venv', '.pytest_cache', 'shader_cache',
         'captures', 'logs', 'games', 'saves', 'savedata', 'firmware'}
 PRIVATE_NAMES = {'library.json', 'python.path', 'performance.txt', 'threads.txt', 'prod.keys', 'title.keys'}
@@ -42,49 +56,66 @@ def runtime_name(platform):
     return 'runtime_win64_win32.exe' if platform == 'windows' else 'runtime_linux_x11'
 
 
+def launcher_name(platform):
+    return NAME + ('.exe' if platform == 'windows' else '')
+
+
 def vp9_path(platform):
     return Path('runtime/vp9') / ('win' if platform == 'windows' else 'lin') / 'libvpx.a'
 
 
+def engine_allowed(name, platform):
+    """Whether engine/<name> (posix) belongs in a release: the allowlist, the CLI, the runtime and hactool."""
+    extra = ['recomp_cli.py', 'bin/' + runtime_name(platform)]
+    if platform == 'windows': extra += ['tools/hactool/hactool.exe', 'tools/hactool/LICENSE']
+    return name in extra or any(fnmatch.fnmatchcase(name, pattern) for pattern in ENGINE_FILES)
+
+
 def required_files(platform):
-    engine = ['switchrecomp.py', 'nup.py', 'nsp.py', 'runtime/rt.h', 'runtime/audio.h',
-              'runtime/audio_limit.h', 'runtime/audio_queue.h', 'runtime/controller_sony.h',
-              'runtime/controller_sony_win32.h', 'runtime/nvn/gfx/dmsh_abi.h',
-              'runtime/nvn/vk/vk_perf.c', 'runtime/nvn/vk/vk_perf.h', 'tools/build_nvn.py',
-              'tools/s2r_paths.py', 'tools/nxshader/s2r_paths.py', 'tools/nxshader/nxs_live.py',
-              'tools/nxshader/nxs_cache.py', 'tools/nxshader/nxs_front.py', 'tools/nxshader/nxshader.py',
-              'tools/nxshader/nxs_refl.py', 'tools/nxshader/nxs_spv.py', 'tools/nxshader/dmsh_abi.py',
-              'tools/nxshader/dmsh_ampere.py', 'tools/nxshader/dmsh_meshstage.py',
-              'tools/nxshader/xlate_bin/dmsh_xlate.dll', 'tools/nxshader/xlate_bin/dmsh_xlate.deps.json',
-              'tools/nxshader/xlate_bin/dmsh_xlate.runtimeconfig.json',
-              'tools/nxshader/xlate_bin/LICENSE-Ryujinx.txt', 'tools/nxshader/xlate_bin/LICENSE-nxnative.txt',
-              'LICENSE.txt', 'NOTICE.txt', 'docs/THIRD_PARTY.md',
-              'runtime/vp9/LICENSE-libvpx.txt', 'runtime/vp9/PATENTS-libvpx.txt',
-              vp9_path(platform).as_posix(), 'bin/' + runtime_name(platform)]
-    common = ['src/recomp_cli.py', 'docs/RELEASES.md',
-              'dependency-manifest.json', 'dotnet/LICENSE.txt', 'dotnet/ThirdPartyNotices.txt',
-              'sources/libvpx_1.14.0-1ubuntu2.3.dsc', 'sources/libvpx_1.14.0.orig.tar.xz',
-              'sources/libvpx_1.14.0-1ubuntu2.3.debian.tar.xz']
-    common += ['sources/' + module + '-everywhere-src-6.8.3.tar.xz' for module in ('qtbase', 'qtimageformats', 'qtsvg')]
+    engine = [n for n in ENGINE_FILES if '*' not in n] + [
+        'recomp_cli.py', 'bin/' + runtime_name(platform), 'tools/nxshader/xlate_bin/dmsh_xlate.dll',
+        'tools/nxshader/xlate_bin/dmsh_xlate.deps.json', 'tools/nxshader/xlate_bin/dmsh_xlate.runtimeconfig.json',
+        'tools/nxshader/xlate_bin/LICENSE-Ryujinx.txt', 'tools/nxshader/xlate_bin/LICENSE-nxnative.txt']
+    legal = [*ENGINE_LEGAL.values(), 'dependency-manifest.json',
+             'sources/libvpx_1.14.0-1ubuntu2.3.dsc', 'sources/libvpx_1.14.0.orig.tar.xz',
+             'sources/libvpx_1.14.0-1ubuntu2.3.debian.tar.xz']
+    legal += ['sources/' + module + '-everywhere-src-6.8.3.tar.xz' for module in ('qtbase', 'qtimageformats', 'qtsvg')]
+    toolchain = ['dotnet/LICENSE.txt', 'dotnet/ThirdPartyNotices.txt']
     if platform == 'windows':
         engine += ['tools/hactool/hactool.exe', 'tools/hactool/LICENSE']
-        common += [NAME + '.cmd', 'python/python.exe', 'python/LICENSE.txt',
-                   'gcc/Library/bin/x86_64-w64-mingw32-gcc.exe', 'dotnet/dotnet.exe', 'scripts/_python.bat',
-                   'bin/launcher/SwitchRecompLauncher.exe', 'bin/launcher/Qt6Core.dll',
-                   'bin/launcher/Qt6Gui.dll', 'bin/launcher/Qt6Widgets.dll',
-                   'bin/launcher/platforms/qwindows.dll', 'bin/launcher/platforms/qoffscreen.dll',
-                   'bin/launcher/imageformats/qwebp.dll', 'bin/launcher/msvcp140.dll',
-                   'bin/launcher/vcruntime140.dll', 'bin/launcher/vcruntime140_1.dll'] + [
-                   'shader-tools/Library/bin/' + tool + '.exe' for tool in ('spirv-as', 'spirv-val', 'spirv-opt')]
+        toolchain += ['python/python.exe', 'python/LICENSE.txt', 'gcc/Library/bin/x86_64-w64-mingw32-gcc.exe',
+                      'dotnet/dotnet.exe'] + ['shader-tools/Library/bin/' + t + '.exe' for t in ('spirv-as', 'spirv-val', 'spirv-opt')]
+        top = [launcher_name(platform), 'Qt6Core.dll', 'Qt6Gui.dll', 'Qt6Widgets.dll', 'platforms/qwindows.dll',
+               'platforms/qoffscreen.dll', 'imageformats/qwebp.dll', 'msvcp140.dll', 'vcruntime140.dll', 'vcruntime140_1.dll']
     else:
-        common += [NAME + '.sh', 'python/bin/python3', 'dotnet/dotnet', 'scripts/_env.sh',
-                   'gcc/bin/x86_64-conda-linux-gnu-gcc',
-                   'bin/launcher/SwitchRecompLauncher', 'bin/launcher/plugins/platforms/libqxcb.so',
-                   'bin/launcher/plugins/platforms/libqoffscreen.so', 'bin/launcher/plugins/imageformats/libqwebp.so',
-                   'lib/libSDL2-2.0.so.0', 'lib/libQt6Core.so.6', 'linux-libraries.json',
-                   'licenses/python/PYTHON.json', 'licenses/python/licenses/LICENSE.cpython.txt'] + [
-                   'shader-tools/bin/' + tool for tool in ('spirv-as', 'spirv-val', 'spirv-opt')]
-    return common + [(ENGINE_DIR / name).as_posix() for name in engine]
+        toolchain += ['python/bin/python3', 'dotnet/dotnet', 'gcc/bin/x86_64-conda-linux-gnu-gcc'] + [
+                      'shader-tools/bin/' + t for t in ('spirv-as', 'spirv-val', 'spirv-opt')]
+        legal += ['linux-libraries.json', 'licenses/python/PYTHON.json', 'licenses/python/licenses/LICENSE.cpython.txt']
+        top = [launcher_name(platform), 'qt.conf', 'plugins/platforms/libqxcb.so', 'plugins/platforms/libqoffscreen.so',
+               'plugins/imageformats/libqwebp.so', 'lib/libSDL2-2.0.so.0', 'lib/libQt6Core.so.6']
+    return (top + [(RELEASE_ENGINE / n).as_posix() for n in engine] + [(TOOLCHAIN / n).as_posix() for n in toolchain]
+            + [(LEGAL / n).as_posix() for n in legal])
+
+
+def check_layout(stage, platform):
+    """Nothing beyond the release layout: the launcher and its Qt runtime at the top, engine/ limited to the
+    allowlist (no runtime sources, tests, docs or developer tools), and the three fixed folders."""
+    plugin = '.dll' if platform == 'windows' else '.so'
+    for path in stage.iterdir():
+        name = path.name
+        if path.is_dir():
+            if name in (RELEASE_ENGINE.name, TOOLCHAIN.name, LEGAL.name): continue
+            if platform == 'linux' and name == 'lib': continue   # bundled Qt/system shared libraries
+            # Qt plugin folders: windeployqt's platforms, imageformats, styles, ...; Linux plugins/<kind>
+            if all(p.is_dir() or plugin in p.name for p in path.rglob('*')): continue
+            raise RuntimeError('Unexpected top-level folder in the release: ' + name)
+        if platform == 'windows' and (name == launcher_name(platform) or name.lower().endswith('.dll')): continue
+        if platform == 'linux' and name in (launcher_name(platform), 'qt.conf'): continue
+        raise RuntimeError('Unexpected top-level file in the release: ' + name)
+    for path in (stage / RELEASE_ENGINE).rglob('*'):
+        name = path.relative_to(stage / RELEASE_ENGINE).as_posix()
+        if path.is_file() and not engine_allowed(name, platform):
+            raise RuntimeError('Engine file outside the release allowlist: ' + name)
 
 
 def validate_contents(stage, platform):
@@ -96,23 +127,29 @@ def validate_contents(stage, platform):
             raise RuntimeError('Non-relocatable symlink: ' + str(relative))
     for name in required_files(platform):
         if not (stage / name).is_file() or not (stage / name).stat().st_size: raise FileNotFoundError(name)
-    for name in ('licenses/qt/qtbase', 'licenses/qt/qtimageformats', 'licenses/qt/qtsvg', 'gcc/licenses', 'shader-tools/licenses'):
+    for name in ('legal/licenses/qt/qtbase', 'legal/licenses/qt/qtimageformats', 'legal/licenses/qt/qtsvg',
+                 'toolchain/gcc/licenses', 'toolchain/shader-tools/licenses'):
         if not any(p.is_file() for p in (stage / name).rglob('*')): raise FileNotFoundError(name)
-    manifest = json.loads((stage / 'dependency-manifest.json').read_text())
+    check_layout(stage, platform)
+    manifest = json.loads((stage / LEGAL / 'dependency-manifest.json').read_text())
     if manifest['platform'] != platform:
         raise RuntimeError('Dependency manifest platform mismatch')
-    vpx = manifest['downloads']['libvpx']
-    lib = stage / ENGINE_DIR / vp9_path(platform)
-    if digest(lib) != vpx['sha256']: raise RuntimeError('VP9 archive does not match dependency provenance')
-    for name, record in vpx['sources'].items():
-        if digest(stage / 'sources' / name) != record['sha256']: raise RuntimeError('VP9 source checksum: ' + name)
-    runtime = stage / ENGINE_DIR / 'bin' / runtime_name(platform)
-    data = runtime.read_bytes()
+    for name, record in manifest['downloads']['libvpx']['sources'].items():
+        if digest(stage / LEGAL / 'sources' / name) != record['sha256']: raise RuntimeError('VP9 source checksum: ' + name)
+    data = (stage / RELEASE_ENGINE / 'bin' / runtime_name(platform)).read_bytes()
     # these strings live in the linked decoder, telemetry and controller implementations, not build scripts
     markers = [b'WebM Project VP9 Decoder', b'frame telemetry:']
     if platform == 'windows': markers += [b'hid.dll', b'setupapi.dll']
     for marker in markers:
         if marker not in data: raise RuntimeError('Native runtime feature missing: ' + marker.decode())
+
+
+def verify_vp9_provenance(engine, manifest_path, platform):
+    """The runtime statically links the engine's committed libvpx archive; it must be the one whose source the
+    release ships (legal/sources). The archive is a build input, so it is checked in the checkout, not shipped."""
+    manifest = json.loads(Path(manifest_path).read_text())
+    if digest(Path(engine) / vp9_path(platform)) != manifest['downloads']['libvpx']['sha256']:
+        raise RuntimeError('VP9 archive does not match dependency provenance')
 
 
 def copy(src, dst):
@@ -126,19 +163,30 @@ def tree(src, dst):
                     ignore=shutil.ignore_patterns(*JUNK, '*.pyc', '*.pdb', '*.log'))
 
 
-def source_files():
-    """Allowlisted files of the launcher checkout, then of the engine submodule, as paths relative to ROOT.
-    git ls-files never descends into a submodule (it lists only its gitlink), so the engine is listed on its own."""
+def launcher_files(launcher, platform):
+    """The deployed launcher folder, allowlisted: the executable plus its DLLs and Qt plugin folders (Windows), or
+    the executable alone (Linux: Qt libraries and plugins are collected from the Qt prefix). windeployqt also drops
+    vc_redist.x64.exe there; the app-local MSVC DLLs make it redundant, so it is not shipped."""
+    exe = launcher / launcher_name(platform)
+    if not exe.is_file(): raise FileNotFoundError(exe)
+    yield exe.relative_to(launcher)
+    if platform != 'windows': return
+    for path in sorted(launcher.rglob('*.dll')):
+        relative = path.relative_to(launcher)
+        if len(relative.parts) <= 2 and not excluded(relative): yield relative
+
+
+def engine_files():
+    """Allowlisted engine files as tracked at the pinned submodule commit, relative to the engine."""
     if not (ENGINE / 'switchrecomp.py').is_file():
         raise FileNotFoundError('Engine submodule is not checked out: git submodule update --init')
-    for base, prefix, dirs, files in ((ROOT, Path(), LAUNCHER_DIRS, LAUNCHER_FILES),
-                                      (ENGINE, ENGINE_DIR, ENGINE_DIRS, ENGINE_FILES)):
-        paths = subprocess.check_output(['git', 'ls-files', '-z', '--cached', '--others', '--exclude-standard'], cwd=base).decode().split('\0')
-        for name in sorted(set(paths)):
-            p = Path(name)
-            if not name or not (p.parts[0] in dirs or name in files): continue
-            if excluded(p): continue
-            if (base / p).is_file(): yield prefix / p
+    tracked = subprocess.check_output(['git', 'ls-files', '-z', '--cached'], cwd=ENGINE).decode().split('\0')
+    names = sorted(n for n in set(tracked)
+                   if n and any(fnmatch.fnmatchcase(n, p) for p in ENGINE_FILES) and not excluded(Path(n)))
+    for pattern in ENGINE_FILES:
+        if not any(fnmatch.fnmatchcase(n, pattern) for n in names): raise FileNotFoundError('Engine file not tracked: ' + pattern)
+    for name in names:
+        if (ENGINE / name).is_file(): yield Path(name)
 
 
 def git(repo, *args, optional=False):
@@ -152,7 +200,7 @@ def provenance(platform):
     engine_commit = git(ENGINE, 'rev-parse', 'HEAD')
     info = {'commit': git(ROOT, 'rev-parse', 'HEAD'), 'engine_commit': engine_commit,
             'platform': platform, 'local_changes': dirty}
-    try: engine_url = git(ROOT, 'config', '-f', '.gitmodules', 'submodule.%s.url' % ENGINE_DIR.as_posix(), optional=True)
+    try: engine_url = git(ROOT, 'config', '-f', '.gitmodules', 'submodule.%s.url' % ENGINE.relative_to(ROOT).as_posix(), optional=True)
     except subprocess.CalledProcessError: engine_url = ''
     if engine_url: info['engine_source'] = engine_url.removesuffix('.git') + '/tree/' + engine_commit
     try: info['source'] = git(ROOT, 'remote', 'get-url', 'origin', optional=True).removesuffix('.git') + '/tree/' + info['commit']
@@ -161,14 +209,17 @@ def provenance(platform):
 
 
 def linux_libraries(stage, qt):
-    plugins = stage / 'bin/launcher/plugins'
+    """Copy the Qt plugins to plugins/ and every non-glibc shared library the launcher, runtime and bundled tools
+    need into lib/ (the launcher's DT_RPATH is $ORIGIN/lib; the launcher puts lib/ on its children's LD_LIBRARY_PATH)."""
+    plugins = stage / 'plugins'
     for name in ('platforms/libqxcb.so', 'platforms/libqoffscreen.so', 'imageformats/libqwebp.so',
                  'imageformats/libqjpeg.so', 'imageformats/libqsvg.so', 'xcbglintegrations/libqxcb-glx-integration.so'):
         copy(qt / 'plugins' / name, plugins / name)
-    env = dict(os.environ, LD_LIBRARY_PATH=os.pathsep.join(map(str, [qt / 'lib', stage / 'lib', stage / 'gcc/lib'])))
-    queue = [stage / 'bin/launcher/SwitchRecompLauncher', stage / ENGINE_DIR / 'bin/runtime_linux_x11',
-             stage / 'python/bin/python3', stage / 'dotnet/dotnet', *plugins.rglob('*.so'),
-             *stage.glob('lib/*.so*'), *[stage / 'shader-tools/bin' / tool for tool in ('spirv-as', 'spirv-val', 'spirv-opt')]]
+    tools = stage / TOOLCHAIN
+    env = dict(os.environ, LD_LIBRARY_PATH=os.pathsep.join(map(str, [qt / 'lib', stage / 'lib', tools / 'gcc/lib'])))
+    queue = [stage / launcher_name('linux'), stage / RELEASE_ENGINE / 'bin' / runtime_name('linux'),
+             tools / 'python/bin/python3', tools / 'dotnet/dotnet', *plugins.rglob('*.so'),
+             *stage.glob('lib/*.so*'), *[tools / 'shader-tools/bin' / tool for tool in ('spirv-as', 'spirv-val', 'spirv-opt')]]
     # .NET loads ICU/OpenSSL dynamically; SDL loads audio/display backends from the host desktop
     for pattern in ('libicu*.so.*', 'libssl.so.*', 'libcrypto.so.*'):
         queue.extend(Path('/usr/lib/x86_64-linux-gnu').glob(pattern))
@@ -190,14 +241,14 @@ def linux_libraries(stage, qt):
             if not dst.exists(): copy(Path(path), dst)
             records.setdefault(name, path)
             queue.append(Path(path))
-    (stage / 'linux-libraries.json').write_text(json.dumps(records, indent=2) + '\n')
+    (stage / LEGAL / 'linux-libraries.json').write_text(json.dumps(records, indent=2) + '\n')
     # preserve the distribution copyright notices for copied system libraries
     for path in set(records.values()):
         result = subprocess.run(['dpkg-query', '-S', path], capture_output=True, text=True)
         if result.returncode: continue
         package = result.stdout.split(':', 1)[0]
         notice = Path('/usr/share/doc') / package / 'copyright'
-        if notice.is_file(): copy(notice, stage / 'licenses/linux' / (package + '.copyright'))
+        if notice.is_file(): copy(notice, stage / LEGAL / 'licenses/linux' / (package + '.copyright'))
 
 
 def digest(path):
@@ -207,9 +258,9 @@ def digest(path):
 def strip_gcc_rpath(stage):
     """conda's GCC specs add -rpath <install dir>/lib to every link, recording the packaging machine's path in each
     binary the bundle builds. Nothing needs it: the game code library links only libc/libm and the launcher puts
-    gcc/lib on LD_LIBRARY_PATH, so drop it. Nothing else needs patching on relocation: GCC derives its sysroot from its own location (spaces
+    toolchain/gcc/lib on LD_LIBRARY_PATH, so drop it. Nothing else needs patching on relocation: GCC derives its sysroot from its own location (spaces
     included) and never reads the clang-style x86_64-conda-linux-gnu.cfg."""
-    for specs in stage.glob('gcc/lib/gcc/x86_64-conda-linux-gnu/*/specs'):
+    for specs in stage.glob('toolchain/gcc/lib/gcc/x86_64-conda-linux-gnu/*/specs'):
         text = specs.read_text()
         stripped = re.sub(r'%\{!static:-rpath [^}]*\}', '', text)
         if stripped == text: raise RuntimeError('Unexpected GCC specs layout, no install rpath: ' + str(specs))
@@ -248,7 +299,7 @@ def dereference_symlinks(stage):
 
 
 def main():
-    ap = argparse.ArgumentParser(description=__doc__)
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--deps', type=Path, required=True)
     ap.add_argument('--launcher', type=Path, required=True)
     ap.add_argument('--qt', type=Path, required=True)
@@ -260,38 +311,41 @@ def main():
     if not re.fullmatch(r'[A-Za-z0-9._-]+', args.name): ap.error('Invalid archive name')
     platform = 'windows' if os.name == 'nt' else 'linux'
     args.output = args.output.resolve(); args.deps = args.deps.resolve(); args.qt = args.qt.resolve()
+    args.launcher = args.launcher.resolve()
     args.output.mkdir(parents=True, exist_ok=True)
+    verify_vp9_provenance(ENGINE, args.deps / 'dependency-manifest.json', platform)
     stage = (args.work.resolve() if args.work else args.output) / (args.name + '-' + platform + '-x64')
     # never merge a release with stale or unrelated files
     stage.mkdir(parents=True, exist_ok=False)
-    for path in source_files(): copy(ROOT / path, stage / path)
-    for name in ('python', 'gcc', 'dotnet', 'shader-tools'): tree(args.deps / name, stage / name)
-    if platform == 'windows': tree(args.deps / 'tools/hactool', stage / ENGINE_DIR / 'tools/hactool')
-    copy(args.deps / 'dependency-manifest.json', stage / 'dependency-manifest.json')
-    tree(args.launcher, stage / 'bin/launcher')
-    runtime = Path('bin') / runtime_name(platform)
-    copy(ENGINE / runtime, stage / ENGINE_DIR / runtime)
-    copy(ENGINE / vp9_path(platform), stage / ENGINE_DIR / vp9_path(platform))
-    tree(args.deps / 'licenses', stage / 'licenses')
-    tree(args.deps / 'sources', stage / 'sources')
-    if platform == 'windows':
-        (stage / (NAME + '.cmd')).write_text('@echo off\n"%~dp0bin\\launcher\\SwitchRecompLauncher.exe" --root "%~dp0third_party\\Switch2RECOMP" %*\n', newline='\r\n')
-    else:
+    # the launcher at the top, as deployed (Windows: with its Qt/MSVC DLLs and plugin folders)
+    for name in launcher_files(args.launcher, platform): copy(args.launcher / name, stage / name)
+    # engine/: the allowlisted engine files, the build CLI, the prebuilt runtime (+ hactool on Windows)
+    engine = stage / RELEASE_ENGINE
+    for name in engine_files(): copy(ENGINE / name, engine / name)
+    copy(ROOT / 'src/recomp_cli.py', engine / 'recomp_cli.py')
+    copy(ENGINE / 'bin' / runtime_name(platform), engine / 'bin' / runtime_name(platform))
+    if platform == 'windows':   # nsp.py looks for engine/tools/hactool; the binary is a pinned download, its LICENSE tracked
+        copy(args.deps / 'tools/hactool/hactool.exe', engine / 'tools/hactool/hactool.exe')
+        copy(ENGINE / 'tools/hactool/LICENSE', engine / 'tools/hactool/LICENSE')
+    # toolchain/: the bundled interpreters and compilers
+    for name in TOOLS: tree(args.deps / name, stage / TOOLCHAIN / name)
+    # legal/: notices, corresponding sources and provenance
+    legal = stage / LEGAL
+    for source, name in ENGINE_LEGAL.items(): copy(ENGINE / source, legal / name)
+    tree(args.deps / 'licenses', legal / 'licenses')
+    tree(args.deps / 'sources', legal / 'sources')
+    copy(args.deps / 'dependency-manifest.json', legal / 'dependency-manifest.json')
+    if platform == 'linux':
         tree(args.deps / 'lib', stage / 'lib')
         linux_libraries(stage, args.qt)
-        (stage / 'bin/launcher/qt.conf').write_text('[Paths]\nPlugins=plugins\n')
-        wrapper = stage / (NAME + '.sh')
-        wrapper.write_text('#!/bin/sh\nset -eu\nroot=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)\n'
-                           'export LD_LIBRARY_PATH="$root/lib:$root/gcc/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"\n'
-                           'export QT_QPA_PLATFORM="${QT_QPA_PLATFORM:-xcb}"\n'
-                           'exec "$root/bin/launcher/SwitchRecompLauncher" --root "$root/third_party/Switch2RECOMP" "$@"\n')
-        wrapper.chmod(0o755)
+        (stage / 'qt.conf').write_text('[Paths]\nPlugins=plugins\n')
         strip_gcc_rpath(stage)
     dereference_symlinks(stage)
     validate_contents(stage, platform)
-    (stage / 'build-info.json').write_text(json.dumps(provenance(platform), indent=2) + '\n')
+    (legal / 'build-info.json').write_text(json.dumps(provenance(platform), indent=2) + '\n')
+    sums = legal / 'SHA256SUMS'   # paths relative to the release root: cd <release> && sha256sum -c legal/SHA256SUMS
     files = sorted(p for p in stage.rglob('*') if p.is_file())
-    (stage / 'SHA256SUMS').write_text(''.join(digest(p) + '  ' + p.relative_to(stage).as_posix() + '\n' for p in files))
+    sums.write_text(''.join(digest(p) + '  ' + p.relative_to(stage).as_posix() + '\n' for p in files))
     if args.stage_only:
         print(stage); return
     if platform == 'windows':

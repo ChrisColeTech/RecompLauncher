@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 # RecompLauncher - native game library and build launcher.
 # The vendored Switch2RECOMP engine keeps its AGPL-3.0 notices under third_party/Switch2RECOMP.
-"""Extract an archive away from the checkout, build a synthetic NUP, and probe its bundled tools."""
+"""Extract a release away from the checkout, start its launcher with no help (no --root, PATH or LD_LIBRARY_PATH),
+build a synthetic NUP through it, and probe the bundled tools."""
 import argparse
 import importlib.util
 import json
@@ -30,15 +31,17 @@ def safe_name(name):
 
 
 def verify_manifest(root):
+    sums = root / package.LEGAL / 'SHA256SUMS'
+    own = sums.relative_to(root).as_posix()
     listed = set()
-    for line in (root / 'SHA256SUMS').read_text().splitlines():
+    for line in sums.read_text().splitlines():
         sha, name = line.split('  ', 1)
         safe_name(name)
-        if not re.fullmatch('[0-9a-f]{64}', sha) or name in listed or name == 'SHA256SUMS':
+        if not re.fullmatch('[0-9a-f]{64}', sha) or name in listed or name == own:
             raise RuntimeError('Invalid or duplicate manifest entry: ' + name)
         listed.add(name)
         if package.digest(root / name) != sha: raise RuntimeError('Checksum mismatch: ' + name)
-    actual = {p.relative_to(root).as_posix() for p in root.rglob('*') if p.is_file()} - {'SHA256SUMS'}
+    actual = {p.relative_to(root).as_posix() for p in root.rglob('*') if p.is_file()} - {own}
     if listed != actual: raise RuntimeError('Manifest does not cover exactly the archive contents: ' + str(actual ^ listed))
 
 
@@ -68,6 +71,34 @@ def run(args, cwd, env, timeout=180):
     return result.stdout
 
 
+def check_linux_loader(root, env):
+    """The launcher and its xcb platform plugin resolve every library with no LD_LIBRARY_PATH, Qt from the bundle."""
+    for binary in (root / package.launcher_name('linux'), root / 'plugins/platforms/libqxcb.so'):
+        output = run(['ldd', binary], root, env)
+        if 'not found' in output: raise RuntimeError('Unresolved library without LD_LIBRARY_PATH:\n' + output)
+        qt = re.findall(r'^\s*(libQt6\S+) => (/\S+)', output, re.M)
+        if not qt: raise RuntimeError('No Qt libraries resolved for ' + str(binary))
+        for name, path in qt:
+            if not Path(path).resolve().is_relative_to(root.resolve()): raise RuntimeError(name + ' loaded from outside the release: ' + path)
+
+
+INCLUDE = re.compile(r'^\s*#\s*include\s+"([^"]+)"', re.M)
+
+
+def check_generated_includes(build, runtime_dir):
+    """Every quoted #include of the generated C, and of what it includes, resolves inside engine/runtime."""
+    sources = sorted(build.glob('*.c'))
+    if not sources: raise RuntimeError('No generated C in ' + str(build))
+    pending, seen = [(s, build) for s in sources], set()
+    while pending:
+        source, base = pending.pop()
+        for name in INCLUDE.findall(source.read_text(errors='replace')):
+            found = next((d / name for d in (base, runtime_dir) if (d / name).is_file()), None)
+            if found is None: raise RuntimeError('%s includes %s, missing from the release' % (source.name, name))
+            if found not in seen: seen.add(found); pending.append((found, found.parent))
+    return sorted(p.relative_to(runtime_dir).as_posix() for p in seen if p.is_relative_to(runtime_dir))
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('archive', type=Path)
@@ -76,31 +107,38 @@ def main():
         temp = Path(temp)
         root = extract_archive(args.archive, temp)
         win = os.name == 'nt'
-        package.validate_contents(root, 'windows' if win else 'linux')
+        platform = 'windows' if win else 'linux'
+        package.validate_contents(root, platform)
         verify_manifest(root)
-        info = json.loads((root / 'build-info.json').read_text())
+        legal = root / package.LEGAL
+        package.verify_vp9_provenance(package.ENGINE, legal / 'dependency-manifest.json', platform)
+        info = json.loads((legal / 'build-info.json').read_text())
         if os.environ.get('GITHUB_SHA') and (info['commit'] != os.environ['GITHUB_SHA'] or info['local_changes']):
             raise RuntimeError('Release provenance differs from the clean CI commit')
         env = dict(os.environ)
         for key in list(env):
-            if key.startswith(('PYTHON', 'QT_', 'SWR_', 'S2R_', 'DOTNET_', 'CONDA')) or key in {'LD_LIBRARY_PATH', 'VIRTUAL_ENV', 'QTDIR', 'GCC_EXEC_PREFIX', 'COMPILER_PATH', 'LIBRARY_PATH'}: env.pop(key)
+            if key.startswith(('PYTHON', 'QT_', 'SWR_', 'S2R_', 'DOTNET_', 'CONDA', 'NXSHADER')) or key in {'LD_LIBRARY_PATH', 'VIRTUAL_ENV', 'QTDIR', 'GCC_EXEC_PREFIX', 'COMPILER_PATH', 'LIBRARY_PATH'}: env.pop(key)
         env['PATH'] = str(Path(os.environ['SystemRoot']) / 'System32') if win else '/usr/bin:/bin'
         env['QT_QPA_PLATFORM'] = 'offscreen'
-        env['DOTNET_ROOT'] = str(root / 'dotnet')
         env['PYTHONDONTWRITEBYTECODE'] = '1'
         # keep all settings and caches disposable, even if the launcher changes its defaults
         home = temp / 'profile'; home.mkdir()
         for key in ('HOME', 'USERPROFILE', 'APPDATA', 'LOCALAPPDATA', 'XDG_CONFIG_HOME', 'XDG_CACHE_HOME', 'XDG_DATA_HOME'):
             env[key] = str(home)
-        if not win: env['LD_LIBRARY_PATH'] = str(root / 'lib') + ':' + str(root / 'gcc/lib')
-        engine = root / package.ENGINE_DIR
-        python = root / ('python/python.exe' if win else 'python/bin/python3')
-        dotnet = root / ('dotnet/dotnet.exe' if win else 'dotnet/dotnet')
-        cc = root / ('gcc/Library/bin/x86_64-w64-mingw32-gcc.exe' if win else 'gcc/bin/x86_64-conda-linux-gnu-gcc')
-        shader_tools = root / ('shader-tools/Library/bin' if win else 'shader-tools/bin')
+        launch_env = dict(env)   # the launcher gets nothing else: it must find engine/ and toolchain/ by itself
+        engine, tools = root / package.RELEASE_ENGINE, root / package.TOOLCHAIN
+        python = tools / ('python/python.exe' if win else 'python/bin/python3')
+        dotnet = tools / ('dotnet/dotnet.exe' if win else 'dotnet/dotnet')
+        cc = tools / ('gcc/Library/bin/x86_64-w64-mingw32-gcc.exe' if win else 'gcc/bin/x86_64-conda-linux-gnu-gcc')
+        shader_tools = tools / ('shader-tools/Library/bin' if win else 'shader-tools/bin')
+        # direct tool probes get the environment the launcher gives its children (Toolchain::environment)
+        env['DOTNET_ROOT'] = str(dotnet.parent)
         env['NXSHADER_TOOLS'] = str(shader_tools)
-        env['PATH'] = os.pathsep.join([str(cc.parent), str(root / 'bin/launcher'), str(shader_tools), env['PATH']])
-        if not win:   # a sysroot outside the bundle could link against the host's glibc files and hide breakage
+        env['PATH'] = os.pathsep.join([str(cc.parent), str(shader_tools), env['PATH']])
+        if not win:
+            env['LD_LIBRARY_PATH'] = str(root / 'lib') + ':' + str(tools / 'gcc/lib')
+            check_linux_loader(root, launch_env)
+            # a sysroot outside the bundle could link against the host's glibc files and hide breakage
             sysroot = Path(run([cc, '-print-sysroot'], temp, env).strip())
             if not sysroot.resolve().is_relative_to(root.resolve()): raise RuntimeError('GCC sysroot outside the bundle: ' + str(sysroot))
         for tool in ('spirv-as', 'spirv-val', 'spirv-opt'):
@@ -111,8 +149,6 @@ def main():
             if probe.returncode not in (0, 1) or 'hactool' not in (probe.stdout + probe.stderr).lower():
                 raise RuntimeError('Bundled hactool did not start')
         run([python, '-I', '-c', 'from compression import zstd; import ctypes, ssl, multiprocessing'], temp, env)
-        selected = run([python, '-B', engine / 'tools/s2r_paths.py'], temp, env)
-        if str(python) not in selected: raise RuntimeError('Relocated helpers did not select bundled Python')
         sha = run([dotnet, engine / 'tools/nxshader/xlate_bin/dmsh_xlate.dll', '--source-sha'], temp, env).strip()
         if not re.fullmatch(r'[0-9a-f]{16}', sha): raise RuntimeError('Shader translator did not identify its source')
         cpp = temp / 'probe.cpp'; cpp.write_text('#include <vector>\nint main(){std::vector<int> v{42};return v[0]!=42;}\n')
@@ -122,35 +158,43 @@ def main():
         source = temp / 'Synthetic [v0] & input.nup'
         write_nup(source, {'Data/raw.bin': b'release fixture'}, {'main': minimal_nso()})
         output = temp / 'Build output'; library = temp / 'library.json'
-        launcher = root / ('bin/launcher/SwitchRecompLauncher.exe' if win else package.NAME + '.sh')
-        options = ['--root', engine] if win else []   # the Linux wrapper passes --root itself
-        run([launcher, *options, '--library', library, '--smoke-build', source, '--build-output', output], temp, env)
-        game, = json.loads(library.read_text())['games']
+        launcher = root / package.launcher_name(platform)
+        # no --root: the release launcher must discover engine/ beside itself
+        run([launcher, '--library', library, '--smoke-build', source, '--build-output', output], temp, launch_env)
+        saved = json.loads(library.read_text())
+        if not os.path.samefile(saved['toolRoot'], engine): raise RuntimeError('Launcher did not discover engine/: ' + saved['toolRoot'])
+        game, = saved['games']
         if game['buildIncomplete']: raise RuntimeError('Launcher left the build incomplete')
         for suffix in ('.exe' if win else '', '_code.dll' if win else '_code.so', '_data/romfs.nup'):
             if not (output / (game['outputName'] + suffix)).is_file(): raise RuntimeError('Missing build artifact: ' + suffix)
         if (output / (game['outputName'] + '_data/romfs.nup')).read_text().strip() != str(source): raise RuntimeError('Incorrect NUP pointer')
-        runtime = engine / 'bin' / package.runtime_name('windows' if win else 'linux')
+        included = check_generated_includes(output / (game['outputName'] + '_build'), engine / 'runtime')
+        print('generated C reads from engine/runtime: ' + ', '.join(included))
+        runtime = engine / 'bin' / package.runtime_name(platform)
         if not win and not os.access(runtime, os.X_OK): raise RuntimeError('Runtime lost its executable permission')
         built_runtime = output / (game['outputName'] + ('.exe' if win else ''))
         if package.digest(runtime) != package.digest(built_runtime): raise RuntimeError('Synthetic build used a different runtime')
         if 'renderer=vulkan' not in (output / (game['outputName'] + '.ini')).read_text():
             raise RuntimeError('Synthetic build did not select the native Vulkan renderer')
         if (output / (game['outputName'] + '_data/romfs')).exists(): raise RuntimeError('Synthetic NUP was unnecessarily extracted')
+        # the launcher selected the bundled Python; the engine records the interpreter it ran on for the shader helper
+        selected = (output / 'tools/nxshader/python.path').read_text().strip()
+        if not os.path.samefile(selected, python): raise RuntimeError('Build did not run on the bundled Python: ' + selected)
         for _ in range(2):
-            run([launcher, *options, '--library', library, '--import-build', built_runtime,
-                 '--screenshot', temp / 'import.png'], temp, env)
+            run([launcher, '--library', library, '--import-build', built_runtime, '--screenshot', temp / 'import.png'], temp, launch_env)
             imported = json.loads(library.read_text())['games']
             if len(imported) != 1 or imported[0]['buildIncomplete'] or imported[0]['renderer'] != 'vulkan':
                 raise RuntimeError('Importing the built fixture lost its settings or duplicated the library entry')
             if package.digest(built_runtime) != package.digest(runtime): raise RuntimeError('Import modified the executable')
-        for name in ('nxs_live.py', 'nxs_front.py', 'nxs_cache.py', 'nxs_refl.py', 'nxs_spv.py', 'dmsh_abi.py',
+        for name in ('nxs_live.py', 'nxs_front.py', 'nxs_cache.py', 'nxs_refl.py', 'nxs_spv.py', 'dmsh_abi.py', 'dmsh_abi.h',
                      'dmsh_ampere.py', 'dmsh_meshstage.py', 'nxshader.py', 's2r_paths.py', 'xlate_bin/dmsh_xlate.dll'):
             if not (output / 'tools/nxshader' / name).is_file(): raise FileNotFoundError(name)
         run([python, '-I', '-B', '-c', 'import sys; sys.path.insert(0, sys.argv[1]); import nxshader, nxs_live, dmsh_ampere, dmsh_meshstage',
              output / 'tools/nxshader'], temp, env)
         run([python, '-I', output / 'tools/nxshader/nxs_live.py', '--dump', temp / 'dump', '--cache', temp / 'cache', '--dotnet', dotnet, '--once'], temp, env)
-        print('PASS: archive/file checksums, contents/provenance, native feature markers, relocated Python/zstd, GCC/G++, .NET/SPIRV, Qt synthetic build/import, and staged shader helper')
+        print('PASS: archive/file checksums, release layout + engine allowlist, contents/provenance, native feature markers, '
+              'relocated Python/zstd, GCC/G++, .NET/SPIRV, launcher self-discovery (no --root/PATH help), '
+              'Qt synthetic build/import on the bundled Python, generated-C includes, staged shader helper')
 
 
 if __name__ == '__main__': main()

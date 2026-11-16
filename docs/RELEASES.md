@@ -7,27 +7,43 @@ SDL2, and the shared libraries discovered during packaging.
 
 ## Bundle layout
 
-The bundle mirrors this repository, so the launcher finds everything the same way it does in a checkout:
+A release is laid out for the person running it, not as a copy of this repository:
 
 ```text
 RecompLauncher-<platform>-x64/
-  RecompLauncher.cmd | .sh        starts bin/launcher with --root third_party/Switch2RECOMP
-  bin/launcher/                   Qt launcher and its Qt/MSVC runtime files
-  src/recomp_cli.py               build entry point the launcher runs
-  scripts/ docs/ tests/           launcher helpers and documentation
-  python/ gcc/ dotnet/            bundled tools (the launcher's equivalent of a checkout's .venv)
-  shader-tools/ lib/ (Linux)
-  licenses/ sources/              third-party notices and corresponding source archives
-  third_party/Switch2RECOMP/      the engine: recompiler, runtime sources, tools,
-                                  bin/runtime_*, runtime/vp9/*/libvpx.a, tools/hactool (Windows)
-  dependency-manifest.json build-info.json SHA256SUMS
+  RecompLauncher.exe | RecompLauncher   the launcher: double-click it
+    Windows: + Qt and app-local MSVC DLLs, platforms/ imageformats/ styles/ ... (windeployqt output)
+    Linux:   + lib/ (Qt, SDL2, ICU/OpenSSL and other non-glibc libraries), plugins/, qt.conf
+  engine/       only what a game build reads:
+                  switchrecomp.py nxloader.py codegen.py a64.py nup.py nsp.py   the recompiler
+                  recomp_cli.py                                                 the build entry point the launcher runs
+                  bin/runtime_win64_win32.exe | bin/runtime_linux_x11           the prebuilt native runtime
+                  runtime/cpu.h runtime/cpu_helpers.c                           included by the generated C
+                  runtime/nvn/gfx/dmsh_abi.h tools/nxshader/ (+ xlate_bin/)     staged into every game for Vulkan
+                  tools/hactool/ (Windows)                                      NSP header inspection
+  toolchain/    python/ gcc/ dotnet/ shader-tools/
+  legal/        LICENSE.txt NOTICE.txt THIRD_PARTY.md (engine), licenses/ (third party, incl. libvpx),
+                sources/ (Qt and libvpx source archives), dependency-manifest.json, build-info.json, SHA256SUMS
 ```
+
+The launcher looks for `engine/` and `toolchain/` beside its own executable first, then for a source checkout
+(`third_party/Switch2RECOMP` with `.venv`, `third_party/gcc` and `bin/launcher` at the project root).
+`legal/SHA256SUMS` lists every other file relative to the release root: `sha256sum -c legal/SHA256SUMS` from there.
+
+A release carries no source beyond what a game build reads: no runtime C sources (the runtime ships prebuilt),
+engine tests, docs or developer tools, no launcher sources or scripts, and no `vc_redist.x64.exe` (the MSVC DLLs
+are app-local). The complete source is the `RecompLauncher-source.tar.gz` published with every release.
+Packaging enforces this: `engine/` holds only allowlisted files tracked at the pinned engine commit, and the
+release root holds only the launcher, its Qt runtime and the three folders above.
+
+On Linux the launcher binary carries `DT_RPATH=$ORIGIN/lib`, so it starts without a wrapper script or
+`LD_LIBRARY_PATH`; the Qt plugins find `lib/` through Qt's own `$ORIGIN/../../lib`. The launcher then puts `lib/`,
+`toolchain/gcc/lib` and `toolchain/shader-tools/lib` on the library path of the builds and games it starts.
 
 ## Run a release
 
-- Windows x64: extract the entire ZIP into a writable folder, then open
-  `RecompLauncher.cmd`.
-- Linux x64: extract the tar.gz, then run `./RecompLauncher.sh`.
+- Windows x64: extract the entire ZIP into a writable folder, then open `RecompLauncher.exe`.
+- Linux x64: extract the tar.gz, then run `./RecompLauncher` (or open it from the file manager).
   The release baseline is Ubuntu 24.04 (glibc 2.39) or a compatible newer desktop.
   An X11 session or XWayland is required. Extract onto a filesystem that supports
   Unix permissions and symbolic links.
@@ -37,8 +53,8 @@ The host still supplies its GPU driver, display server, fonts, desktop audio ser
 and OS libraries such as glibc. The NVN texture decoder requires an x64 CPU with
 AVX2, FMA, F16C, and POPCNT. A compatible Vulkan GPU/driver is needed for Vulkan games.
 
-Keep the toolkit directory together. Its startup script selects that copy even if
-another toolkit was used previously. Games launched from the library inherit the
+Keep the release folder together. A launcher started from it uses that folder's engine even if
+another one was used previously (unless one was chosen explicitly in File > Settings > Engine). Games launched from the library inherit the
 current bundled Python, .NET, shader tools, and Linux library paths. Launch through
 the library after moving the toolkit; standalone game executables can retain an old
 Python marker until rebuilt. Moving the toolkit does not move the original NUPs.
@@ -59,12 +75,17 @@ interpreter-selection tests, and the Qt tests, packages its bundle, then extract
 spaces and brackets, outside the checkout. With a minimal tool search path, the smoke test:
 
 1. Verifies the archive checksum and complete per-file SHA-256 manifest, including unlisted-file detection.
-   Checks required runtime headers, shader helpers, Qt plugins, licenses, source archives, and provenance.
+   Checks the release layout and engine allowlist, required runtime headers, shader helpers, Qt plugins, licenses,
+   source archives, and provenance (including that the checkout's libvpx archive the runtime links is the pinned one).
    Rejects personal data, development venvs, and broken, absolute, or escaping symlinks.
-2. Starts bundled Python/zstd, .NET, and SPIRV tools.
-3. Compiles, links and runs a C++ program with bundled GCC, whose sysroot must resolve inside the bundle.
-4. Builds a synthetic NUP through the deployed Qt launcher.
-5. Confirms the copied runtime matches the packaged binary, checks the Vulkan setting and NUP pointer,
+2. On Linux, checks that the launcher and its xcb plugin resolve every library, Qt from the bundle, with no
+   `LD_LIBRARY_PATH`.
+3. Starts bundled Python/zstd, .NET, SPIRV tools and (Windows) hactool.
+4. Compiles, links and runs a C++ program with bundled GCC, whose sysroot must resolve inside the bundle.
+5. Builds a synthetic NUP through the release launcher started with no `--root` and only the system `PATH`, so it
+   must discover `engine/` and `toolchain/` itself; the build must run on the bundled Python, and every
+   `#include` of the generated C must resolve inside `engine/runtime`.
+6. Confirms the copied runtime matches the packaged binary, checks the Vulkan setting and NUP pointer,
    imports that build twice without duplicating the library entry, then imports the staged shader modules
    and starts the shader helper. The synthetic game is never launched.
 
@@ -97,7 +118,7 @@ python scripts/release-deps.py --dest build/release-deps
 ```
 
 This downloads checksum-pinned portable dependencies into a separate directory.
-Both bundles retain the libvpx 1.14.0 Ubuntu `1ubuntu2.3` source package and patches under `sources/`.
+Both bundles retain the libvpx 1.14.0 Ubuntu `1ubuntu2.3` source package and patches under `legal/sources/`.
 The engine commits both VP9-decoder archives, `runtime/vp9/win/libvpx.a` and `runtime/vp9/lin/libvpx.a`,
 built from that source as documented in the README beside each one; nothing is compiled here. Each is verified
 against its pinned SHA-256, which the dependency manifest records with the source hashes and the README path.
@@ -129,16 +150,15 @@ python3 scripts/smoke-release.py dist/RecompLauncher-linux-x64.tar.gz
 Packaging refuses to merge into an existing staging directory. Use another `--output`
 directory for a new local run. `--work` selects a separate staging filesystem, useful
 when working from a Windows-mounted drive under WSL. `--stage-only` skips compression.
-Source files come from explicit directories and Git's tracked/unignored file lists of the
-launcher checkout and of the engine submodule (listed separately, since `git ls-files` does not
-descend into submodules); dependencies come only from the selected release-dependency directory.
+Engine files come from an explicit allowlist (`ENGINE_FILES` in `scripts/package-release.py`) matched against
+the engine submodule's tracked files; the launcher comes from the deployed launcher folder (its executable, DLLs
+and Qt plugin folders only); dependencies come only from the selected release-dependency directory.
 The personal working tree is never recursively archived.
 
 ## Notices and source
 
-The engine's `LICENSE.txt` and `NOTICE.txt` (SwitchRecomp by MZ Labs) ship under
-`third_party/Switch2RECOMP/`. The engine's startup screen is disabled in the turbo branch.
-Linux Python's matching full distribution supplies `licenses/python/` and `PYTHON.json` because the
+The engine's `LICENSE.txt`, `NOTICE.txt` (SwitchRecomp by MZ Labs) and `THIRD_PARTY.md` ship under `legal/`. The engine's startup screen is disabled in the turbo branch.
+Linux Python's matching full distribution supplies `legal/licenses/python/` and `PYTHON.json` because the
 stripped install-only archive omits them. The full archive download is checksum-pinned in
 `dependency-manifest.json`; only its license texts and build metadata are added to the release.
 See [THIRD_PARTY.md](../third_party/Switch2RECOMP/docs/THIRD_PARTY.md) for bundled components and source
