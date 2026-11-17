@@ -95,6 +95,7 @@ actual `BuildManager`/`QProcess` path, asserting the ready-to-play library entry
 ## Releases
 
 Every push to `main` runs `.github/workflows/release.yml`: both platforms build, package, and pass a relocated
-smoke test before a `launcher-<run>-<attempt>` release is published, with the commit changelog as its notes.
+smoke test. To publish a release, bump the version in `VERSION` (semantic versioning) and push: the workflow
+publishes `v<VERSION>` once, with the commit changelog since the previous release as its notes.
 Building and smoke-testing a bundle locally (including the WSL mirror of the Linux job) is in
 [RELEASES.md](RELEASES.md).

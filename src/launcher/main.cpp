@@ -34,7 +34,7 @@ int main(int argc, char** argv) {
     QApplication::setOrganizationName("RecompLauncher");
     QApplication::setApplicationName("RecompLauncher");
     migrateLegacyData();
-    QApplication::setApplicationVersion("0.1.0");
+    QApplication::setApplicationVersion(RECOMPLAUNCHER_VERSION);
     QApplication::setStyle("Fusion");
     Theme::apply(app);
     QFont font("Segoe UI", 9); app.setFont(font);

@@ -97,11 +97,15 @@ the bundle as relative links: GCC finds `Scrt1.o` through its sysroot's `usr/lib
 needs no fixup after extraction, because it derives its sysroot from its own location. Packaging only removes the
 `-rpath` to the packaging machine that conda's specs add to every link.
 
-Both jobs must pass before publishing. Pushes to `main` and manual all-platform runs on `main`
-create a release tagged `launcher-<run number>-<attempt>`, targeting the exact tested commit.
-PRs and manual runs on other branches only upload workflow artifacts. Each release has a Windows ZIP,
+Both jobs must pass before publishing. Releases are versioned from the `VERSION` file at the repository root
+(`MAJOR.MINOR.PATCH`, optionally `-suffix` for a prerelease); the launcher's About/`--version` reads the same file at
+build time. When a push to `main` (or a manual all-platform run on `main`) carries a `VERSION` that has no `v<VERSION>`
+tag yet, the release job publishes release `v<VERSION>`, targeting the exact tested commit. Pushes that don't change
+`VERSION` still build and test both platforms but publish nothing. To release: bump `VERSION` in a commit and push.
+PRs and manual runs on other branches only upload workflow artifacts. The `launcher-<run>-<attempt>` releases predate
+versioning. Each release has a Windows ZIP,
 Linux tar.gz, archive checksums, and a source archive of the launcher with the pinned engine included,
-each with its own checksum. `build-info.json` records the launcher commit, the engine commit and its
+each with its own checksum. `build-info.json` records the version, the launcher commit, the engine commit and its
 source link, and whether a local packaging run had tracked or untracked changes in either repository.
 The archive checks do not establish game compatibility or GPU rendering performance.
 

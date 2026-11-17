@@ -200,7 +200,7 @@ def provenance(platform):
     """Both commits: the launcher checkout and the engine submodule pinned in it."""
     dirty = any(git(repo, 'status', '--porcelain', '--untracked-files=normal') for repo in (ROOT, ENGINE))
     engine_commit = git(ENGINE, 'rev-parse', 'HEAD')
-    info = {'commit': git(ROOT, 'rev-parse', 'HEAD'), 'engine_commit': engine_commit,
+    info = {'version': (ROOT / 'VERSION').read_text().strip(), 'commit': git(ROOT, 'rev-parse', 'HEAD'), 'engine_commit': engine_commit,
             'platform': platform, 'local_changes': dirty}
     try: engine_url = git(ROOT, 'config', '-f', '.gitmodules', 'submodule.%s.url' % ENGINE.relative_to(ROOT).as_posix(), optional=True)
     except subprocess.CalledProcessError: engine_url = ''

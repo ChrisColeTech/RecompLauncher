@@ -17,8 +17,11 @@ def git(*args, cwd='.'):
 
 
 def previous_tag(head):
-    try: return git('describe', '--tags', '--abbrev=0', '--match', 'launcher-*', head + '^')
-    except subprocess.CalledProcessError: return None   # first release: everything
+    """Nearest v* release tag before head; the build-numbered launcher-* tags predate versioning."""
+    for pattern in ('v[0-9]*', 'launcher-*'):
+        try: return git('describe', '--tags', '--abbrev=0', '--match', pattern, head + '^')
+        except subprocess.CalledProcessError: pass
+    return None   # first release: everything
 
 
 def commits(rev_range, cwd='.'):
@@ -50,7 +53,7 @@ def section(title, entries, link=None):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument('--previous', help='previous release tag (default: nearest launcher-* tag before --head)')
+    ap.add_argument('--previous', help='previous release tag (default: nearest v* tag before --head)')
     ap.add_argument('--head', default='HEAD')
     args = ap.parse_args()
     prev = args.previous or previous_tag(args.head)

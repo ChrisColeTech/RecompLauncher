@@ -158,19 +158,40 @@ jobs:
         with:
           submodules: true
           fetch-depth: 0   # full launcher + engine history and tags for the changelog
+      - name: Version
+        id: version
+        run: |
+          version="$(tr -d '[:space:]' < VERSION)"
+          if ! printf '%s' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$'; then
+            echo "::error file=VERSION::'$version' is not a semantic version (MAJOR.MINOR.PATCH)"; exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=v$version" >> "$GITHUB_OUTPUT"
+          # a release is published once per version: bump VERSION to release, other pushes only build and test
+          if git rev-parse -q --verify "refs/tags/v$version" >/dev/null; then
+            echo "::notice::v$version is already released; bump VERSION to publish a new release"
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          fi
       - uses: actions/download-artifact@v4
+        if: steps.version.outputs.publish == 'true'
         with:
           pattern: portable-*
           path: release
           merge-multiple: true
       - name: Verify downloaded archives
+        if: steps.version.outputs.publish == 'true'
         working-directory: release
         run: sha256sum -c *.sha256
       - name: Publish tested bundles
+        if: steps.version.outputs.publish == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
-          tag="launcher-${GITHUB_RUN_NUMBER}-${GITHUB_RUN_ATTEMPT}"
+          tag="$TAG"
           prefix=RecompLauncher-source
           # git archive leaves submodules out; append the pinned engine so the source archive is complete (AGPL)
           git archive --format=tar --prefix="$prefix/" -o release/source.tar "$GITHUB_SHA"
@@ -179,6 +200,6 @@ jobs:
           gzip -n -c release/source.tar > "release/$prefix.tar.gz"
           rm release/source.tar release/engine.tar
           (cd release && sha256sum "$prefix.tar.gz" > "$prefix.tar.gz.sha256")
-          # changelog: launcher commits since the previous launcher-* tag, plus the engine commits the pin moved across
+          # changelog: launcher commits since the previous release tag, plus the engine commits the pin moved across
           python3 scripts/release-notes.py --head "$GITHUB_SHA" > "$RUNNER_TEMP/notes.md"
-          gh release create "$tag" release/*.zip release/*.tar.gz release/*.sha256 --target "$GITHUB_SHA" --title "RecompLauncher build ${GITHUB_RUN_NUMBER}" --notes-file "$RUNNER_TEMP/notes.md" --latest
+          gh release create "$tag" release/*.zip release/*.tar.gz release/*.sha256 --target "$GITHUB_SHA" --title "RecompLauncher $VERSION" --notes-file "$RUNNER_TEMP/notes.md" $(case "$VERSION" in *-*) echo --prerelease ;; *) echo --latest ;; esac)
