@@ -43,9 +43,11 @@ class ReleaseChecks(unittest.TestCase):
                      'toolchain/gcc/licenses', 'toolchain/shader-tools/licenses'):
             path = root / name; path.mkdir(parents=True, exist_ok=True); (path / 'LICENSE').write_text('fixture')
         runtime = root / ENGINE / 'bin' / package.runtime_name(platform)
-        runtime.write_bytes(b'WebM Project VP9 Decoder\0frame telemetry:\0hid.dll\0setupapi.dll')
+        runtime.write_bytes(b'WebM Project VP9 Decoder\0dav1d %s decoding AV1\0Error parsing OBU data\0frame telemetry:\0hid.dll\0setupapi.dll')
         manifest = {'platform': platform, 'downloads': {'libvpx': {'sha256': '0' * 64, 'sources': {
-            p.name: {'sha256': package.digest(p)} for p in (root / LEGAL / 'sources').glob('libvpx*')}}}}
+            p.name: {'sha256': package.digest(p)} for p in (root / LEGAL / 'sources').glob('libvpx*')}},
+            'dav1d': {'sha256': '0' * 64, 'sources': {
+            p.name: {'sha256': package.digest(p)} for p in (root / LEGAL / 'sources').glob('dav1d*')}}}}
         (root / LEGAL / 'dependency-manifest.json').write_text(json.dumps(manifest))
         return root
 
@@ -62,6 +64,7 @@ class ReleaseChecks(unittest.TestCase):
                          'recomp_cli.py', 'nup.py', 'zbic.py', 'tools/nxshader/s2r_paths.py',
                          'tools/nxshader/xlate_bin/dmsh_xlate.runtimeconfig.json', 'bin/' + package.runtime_name(platform))] + [
                          package.launcher_name(platform), 'legal/NOTICE.txt', 'legal/licenses/libvpx/LICENSE-libvpx.txt',
+                         'legal/licenses/dav1d/LICENSE-dav1d.txt', 'legal/sources/dav1d-1.5.5.tar.xz',
                          'legal/sources/libvpx_1.14.0-1ubuntu2.3.debian.tar.xz', 'toolchain/dotnet/LICENSE.txt']:
                 path = root / name; data = path.read_bytes(); path.unlink()
                 with self.assertRaises(FileNotFoundError, msg=name): package.validate_contents(root, platform)
@@ -90,7 +93,7 @@ class ReleaseChecks(unittest.TestCase):
 
     def test_runtime_requires_vp9_nvn_telemetry_and_sony(self):
         root = self.bundle('windows'); runtime = root / ENGINE / 'bin/runtime_win64_win32.exe'; data = runtime.read_bytes()
-        for marker in (b'WebM Project VP9 Decoder', b'frame telemetry:', b'hid.dll', b'setupapi.dll'):
+        for marker in (b'WebM Project VP9 Decoder', b'dav1d %s decoding AV1', b'Error parsing OBU data', b'frame telemetry:', b'hid.dll', b'setupapi.dll'):
             runtime.write_bytes(data.replace(marker, b''))
             with self.assertRaisesRegex(RuntimeError, 'Native runtime feature'): package.validate_contents(root, 'windows')
         runtime.write_bytes(data)
@@ -102,6 +105,14 @@ class ReleaseChecks(unittest.TestCase):
         package.verify_vp9_provenance(engine, manifest, 'windows')
         lib.write_bytes(b'wrong target library')
         with self.assertRaisesRegex(RuntimeError, 'provenance'): package.verify_vp9_provenance(engine, manifest, 'windows')
+        # and the linked libdav1d archive (AV1), the same way; a wrong AV1 source in the bundle is refused too
+        lib = engine / package.av1_path('windows'); lib.parent.mkdir(parents=True); lib.write_bytes(b'pinned archive')
+        record['downloads']['dav1d']['sha256'] = package.digest(lib); manifest.write_text(json.dumps(record))
+        package.verify_av1_provenance(engine, manifest, 'windows')
+        lib.write_bytes(b'wrong target library')
+        with self.assertRaisesRegex(RuntimeError, 'AV1 archive'): package.verify_av1_provenance(engine, manifest, 'windows')
+        source = root / LEGAL / 'sources' / 'dav1d-1.5.5.tar.xz'; source.write_bytes(b'another archive')
+        with self.assertRaisesRegex(RuntimeError, 'AV1 source checksum'): package.validate_contents(root, 'windows')
 
     def test_private_inputs_rejected(self):
         root = self.bundle('windows')
@@ -260,12 +271,13 @@ class ReleaseChecks(unittest.TestCase):
         for win, backend, subdir, nvn in ((True, 'win32', 'win', 'nvn'), (False, 'x11', 'lin', 'nvn_lin')):
             rt = self.root / 'runtime'; vp9 = rt / 'vp9' / subdir / 'libvpx.a'
             vp9.parent.mkdir(parents=True, exist_ok=True); vp9.touch()
+            av1 = rt / 'av1' / subdir / 'libdav1d.a'; av1.parent.mkdir(parents=True, exist_ok=True); av1.touch()
             native = self.root / 'build' / nvn / 'libnvn.a'; native.parent.mkdir(parents=True); native.touch()
             with patch.object(compiler, 'HERE', str(self.root)), patch.object(compiler, 'RT', str(rt)), \
                  patch.object(compiler, 'run_cc', return_value=None) as cc, patch.dict(os.environ, {}, clear=True):
                 compiler.build_runtime('gcc', 'unused', win, backend, print)
             command = cc.call_args.args[0]
-            for flag in ('-DSWR_HAVE_NVN', '-DSWR_HAVE_VP9', str(native), str(vp9)):
+            for flag in ('-DSWR_HAVE_NVN', '-DSWR_HAVE_VP9', '-DSWR_HAVE_AV1', str(native), str(vp9), str(av1)):
                 self.assertIn(flag, command)
             self.assertIn(str(rt / 'audio.c'), command)
             self.assertIn(str(rt / 'svc_hid.c'), command)
@@ -298,5 +310,38 @@ class ReleaseChecks(unittest.TestCase):
     def test_committed_vp9_archives_match_pins(self):
         for folder, sha in dependencies.VPX_ARCHIVES.values():
             self.assertEqual(package.digest(dependencies.ENGINE / folder / 'libvpx.a'), sha, folder)
+
+    def test_av1_archives_verified_not_built_and_source_recorded(self):
+        dest = self.root / 'deps-av1'; dest.mkdir()
+        def fetch(url, sha, cache):
+            path = Path(cache); path.parent.mkdir(parents=True, exist_ok=True); path.write_bytes(b'source fixture')
+        archives = {}
+        for platform, folder in (('windows', 'win'), ('linux', 'lin')):
+            lib = self.root / 'runtime/av1' / folder / 'libdav1d.a'; lib.parent.mkdir(parents=True)
+            lib.write_bytes(platform.encode()); archives[platform] = ('runtime/av1/' + folder, package.digest(lib))
+        with patch.object(dependencies, 'ENGINE', self.root), patch.object(dependencies, 'DAV1D_ARCHIVES', archives), \
+             patch.object(dependencies.deps, 'fetch', side_effect=fetch), \
+             patch.object(dependencies.subprocess, 'run', side_effect=AssertionError('dav1d must not be built')):
+            for platform, (folder, sha) in archives.items():
+                record = dependencies.prepare_av1(dest, platform)
+                self.assertEqual(record['sha256'], sha)
+                self.assertEqual(record['build'], 'runtime/av1/README.md')
+                self.assertEqual(set(record['sources']), {package.DAV1D_SOURCE})
+                self.assertTrue(all(r['url'].startswith('https://downloads.videolan.org/') for r in record['sources'].values()))
+                lib = self.root / folder / 'libdav1d.a'; data = lib.read_bytes()
+                lib.write_bytes(b'rebuilt locally')
+                with self.assertRaisesRegex(RuntimeError, 'documented source build'): dependencies.prepare_av1(dest, platform)
+                lib.unlink()
+                with self.assertRaisesRegex(RuntimeError, 'documented source build'): dependencies.prepare_av1(dest, platform)
+                lib.write_bytes(data)
+        self.assertTrue((dest / 'sources' / package.DAV1D_SOURCE).is_file())
+
+    def test_committed_av1_archives_match_pins_and_readme(self):
+        readme = (dependencies.ENGINE / 'runtime/av1/README.md').read_text(encoding='utf-8')
+        self.assertIn(dependencies.DAV1D_SOURCE[1], readme)
+        self.assertEqual(dependencies.DAV1D_SOURCE[0].rsplit('/', 1)[1], package.DAV1D_SOURCE)
+        for folder, sha in dependencies.DAV1D_ARCHIVES.values():
+            self.assertEqual(package.digest(dependencies.ENGINE / folder / 'libdav1d.a'), sha, folder)
+            self.assertIn(sha, readme)
 
 if __name__ == '__main__': unittest.main()

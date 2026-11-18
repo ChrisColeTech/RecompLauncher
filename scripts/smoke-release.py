@@ -113,6 +113,7 @@ def main():
         verify_manifest(root)
         legal = root / package.LEGAL
         package.verify_vp9_provenance(package.ENGINE, legal / 'dependency-manifest.json', platform)
+        package.verify_av1_provenance(package.ENGINE, legal / 'dependency-manifest.json', platform)
         info = json.loads((legal / 'build-info.json').read_text())
         if os.environ.get('GITHUB_SHA') and (info['commit'] != os.environ['GITHUB_SHA'] or info['local_changes']):
             raise RuntimeError('Release provenance differs from the clean CI commit')

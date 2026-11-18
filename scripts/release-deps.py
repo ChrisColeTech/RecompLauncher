@@ -15,7 +15,7 @@ import urllib.request
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
-ENGINE = ROOT / 'third_party' / 'Switch2RECOMP'   # engine submodule: get_deps.py and the VP9 archives
+ENGINE = ROOT / 'third_party' / 'Switch2RECOMP'   # engine submodule: get_deps.py and the VP9 and AV1 archives
 sys.path.insert(0, str(ENGINE / 'tool'))
 import get_deps as deps
 
@@ -49,6 +49,14 @@ VPX_ARCHIVES = {
     'windows': ('runtime/vp9/win', '441569ee34a9731973b0ea670faa4a2133daedb3905ce81bd42d10c9820a5066'),
     'linux': ('runtime/vp9/lin', '2a2fa82e5141041dc6b18a5e7ce763707e23fde91cc34552e47ac0fbc2b2e545'),
 }
+# dav1d (AV1 decoder): the unmodified release archive, and the engine's two static archives built from it by
+# runtime/av1/build_dav1d.py (see runtime/av1/README.md); releases verify them like the VP9 ones.
+DAV1D_SOURCE = ('https://downloads.videolan.org/pub/videolan/dav1d/1.5.5/dav1d-1.5.5.tar.xz',
+                'ca96b1d0ba3f01f55de7231d775892b64994ba061aaeeaaa4f662a390b3abf9e')
+DAV1D_ARCHIVES = {
+    'windows': ('runtime/av1/win', 'f64d2ee3a9846c40c08fa7b6992ae53b8ccc7384b9a4023ca7695419ce46f96a'),
+    'linux': ('runtime/av1/lin', 'f7d3af175b5cac993fdd0146db610f8e0a58b2b56820cf7dd5f5c6cc7a2320ca'),
+}
 PYTHON_FULL = ('https://github.com/astral-sh/python-build-standalone/releases/download/20261110/'
                'cpython-3.14.10%2B20261110-x86_64-unknown-linux-gnu-pgo%2Blto-full.tar.zst',
                '4730c0dc79e7eecbe54a323d587fdeaab621094fe09b5827167d69045115fcbc')
@@ -66,6 +74,18 @@ def prepare_vp9(dest, platform):
     if not lib.is_file() or hashlib.sha256(lib.read_bytes()).hexdigest() != sha:
         raise RuntimeError('Committed libvpx differs from its documented source build: ' + str(lib))
     return {'sources': records, 'sha256': sha, 'build': folder + '/README.md'}
+
+
+def prepare_av1(dest, platform):
+    """Verify the engine's committed libdav1d and fetch the source it was built from (shipped under sources/)."""
+    url, source_sha = DAV1D_SOURCE
+    name = url.rsplit('/', 1)[1]
+    deps.fetch(url, source_sha, str(dest / 'sources' / name))
+    folder, sha = DAV1D_ARCHIVES[platform]
+    lib = ENGINE / folder / 'libdav1d.a'
+    if not lib.is_file() or hashlib.sha256(lib.read_bytes()).hexdigest() != sha:
+        raise RuntimeError('Committed libdav1d differs from its documented source build: ' + str(lib))
+    return {'sources': {name: {'url': url, 'sha256': source_sha}}, 'sha256': sha, 'build': 'runtime/av1/README.md'}
 
 
 def python_notices(dest):
@@ -94,6 +114,7 @@ def main():
     platform = 'windows' if os.name == 'nt' else 'linux'
     manifest = {'platform': platform, 'downloads': {}}
     manifest['downloads']['libvpx'] = prepare_vp9(dest, platform)
+    manifest['downloads']['dav1d'] = prepare_av1(dest, platform)
     if platform == 'linux': manifest['downloads']['python-notices'] = python_notices(dest)
     for module, sha in QT_SOURCES.items():
         name = module + '-everywhere-src-6.8.3.tar.xz'

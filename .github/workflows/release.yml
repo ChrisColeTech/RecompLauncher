@@ -72,6 +72,9 @@ jobs:
         env:
           LD_LIBRARY_PATH: ${{ github.workspace }}/build/release-deps/lib
         run: sh ${{ env.ENGINE }}/tests/run_audio.sh
+      - name: Linux AV1 decoder test (the engine's committed dav1d)
+        if: runner.os == 'Linux'
+        run: python ${{ env.ENGINE }}/tests/test_av1.py
       - name: Windows launcher build dependencies
         if: runner.os == 'Windows'
         run: python -m pip install cmake==3.31.10 ninja==1.13.2
@@ -97,6 +100,8 @@ jobs:
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           python "$env:ENGINE/tests/test_mkw_runtime.py"
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          python "$env:ENGINE/tests/test_av1.py"
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
       - name: Windows runtime and launcher
         if: runner.os == 'Windows'
         shell: pwsh
@@ -114,6 +119,7 @@ jobs:
           python "$ENGINE/tools/build_nvn.py" --linux --jobs 4
           test -s "$ENGINE/build/nvn_lin/libnvn.a"
           test -s "$ENGINE/runtime/vp9/lin/libvpx.a"
+          test -s "$ENGINE/runtime/av1/lin/libdav1d.a"
           python src/recomp_cli.py --build-runtime --target linux --backend x11 --cc gcc
           SWR_QT_PREFIX="$QT_ROOT_DIR" SWR_JOBS=4 sh scripts/build-launcher.sh
       - name: Package Windows

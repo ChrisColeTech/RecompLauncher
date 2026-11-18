@@ -89,7 +89,7 @@ spaces and brackets, outside the checkout. With a minimal tool search path, the 
    imports that build twice without duplicating the library entry, then imports the staged shader modules
    and starts the shader helper. The synthetic game is never launched.
 
-Packaging requires linked VP9 and NVN telemetry markers in both native runtimes and Sony HID loader markers
+Packaging requires linked VP9, AV1 (dav1d) and NVN telemetry markers in both native runtimes and Sony HID loader markers
 on Windows. The clean workflow builds the OpenGL/NVN desktop runtime and its audio mixer, and links the committed VP9 decoder.
 Optional Eden, OpenH264, Opus, and SPIRV-Cross/LSFG static libraries are not built by this workflow.
 Packaging replaces file symlinks with copies of their targets but keeps directory symlinks that stay inside
@@ -122,7 +122,11 @@ python scripts/release-deps.py --dest build/release-deps
 ```
 
 This downloads checksum-pinned portable dependencies into a separate directory.
-Both bundles retain the libvpx 1.14.0 Ubuntu `1ubuntu2.3` source package and patches under `legal/sources/`.
+Both bundles retain the libvpx 1.14.0 Ubuntu `1ubuntu2.3` source package and patches under `legal/sources/`,
+and dav1d 1.5.5's unmodified release archive (`dav1d-1.5.5.tar.xz`), with its license in `legal/licenses/dav1d/`.
+The engine commits both AV1-decoder archives the same way, `runtime/av1/win/libdav1d.a` and
+`runtime/av1/lin/libdav1d.a`, built by `runtime/av1/build_dav1d.py` as `runtime/av1/README.md` documents; each is
+verified against its pinned SHA-256 (`DAV1D_ARCHIVES` in `scripts/release-deps.py`).
 The engine commits both VP9-decoder archives, `runtime/vp9/win/libvpx.a` and `runtime/vp9/lin/libvpx.a`,
 built from that source as documented in the README beside each one; nothing is compiled here. Each is verified
 against its pinned SHA-256, which the dependency manifest records with the source hashes and the README path.
