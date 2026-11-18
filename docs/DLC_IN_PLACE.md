@@ -408,8 +408,9 @@ equals the engine's `bin/runtime_win64_win32.exe`), the save was backed up befor
   failed (exit 1); installing the standalone package and the combined 1G+1U+1D package together installed the title
   from the first and refused the second ("already installed from ..."), leaving one entry in the list. The
   packages' hashes are unchanged.
-- Regression: Mario Kart World rebuilt through the CLI with the same runtime and run to its menus; it makes no
-  `aoc:u` or data storage call.
+- Regression: Mario Kart World rebuilt through the CLI with the same runtime (exe hash equal) and run to character
+  select at 60 FPS, no crash (`20261118-013425-mkw-dlc-regress`). Its only add-on call is `aoc:u` 50
+  (CheckAddOnContentMountStatus); it lists nothing and mounts no data storage. Its save did not change.
 - Tests: launcher `launcher-tests` and `launcher-ui-tests` (the DLC list in `library.json`, the manifest reader,
   package checks, the installer process, the Game menu, the Properties list); engine `tests/test_nsp_dlc.py`
   (20 cases, section 6 of the engine's `docs/DLC.md`) inside `unittest discover -s tests -p "test_n*.py"` (37 OK).
