@@ -15,7 +15,7 @@ RecompLauncher-<platform>-x64/
     Windows: + Qt and app-local MSVC DLLs, platforms/ imageformats/ styles/ ... (windeployqt output)
     Linux:   + lib/ (Qt, SDL2, ICU/OpenSSL and other non-glibc libraries), plugins/, qt.conf
   engine/       only what a game build reads:
-                  switchrecomp.py nxloader.py codegen.py a64.py nup.py nsp.py   the recompiler
+                  switchrecomp.py nxloader.py codegen.py a64.py nup.py nsp.py dlc.py   the recompiler
                   recomp_cli.py                                                 the build entry point the launcher runs
                   bin/runtime_win64_win32.exe | bin/runtime_linux_x11           the prebuilt native runtime
                   runtime/cpu.h runtime/cpu_helpers.c                           included by the generated C

@@ -33,6 +33,26 @@ only the EXE. The engine is found by walking up from the launcher's directory un
 5. Click **Play**, double-click the cover/list row, or press Enter on the selection. Subsequent sessions use
    the existing build; launching does not recompile it.
 
+### DLC (add-on content)
+
+Select the game and choose **Game → Install DLC…**. The picker offers `*.nsp *.nsz *.xci *.xcz *.nca`; several files
+can be chosen at once, and an NSP that holds the game, its update and its DLC together is fine (only the add-on
+titles are taken). The launcher checks each file's type and signature, adds it to the game's DLC list
+(`Game.dlc` in `library.json`) and has the engine install it into the build's data folder
+(`switchrecomp.py --sync-dlc … --datadir <build>/<name>_data`); the engine's output goes to the build console.
+What the engine refuses (a ticket tied to another console, keys without the content's generation, DLC of another
+game, a package without DLC) is shown with its reason and leaves the list again. `prod.keys` is required
+(**Keys → Install keys**).
+
+- A game that is not built yet keeps the list; the DLC is installed when its build finishes.
+- **Play** checks that the data folder holds exactly the listed DLC and installs or removes what differs first.
+- **Properties → DLC** lists each package with the title ids and versions installed from it. Right-click an entry →
+  **Remove** (or Delete); it takes effect on **OK**. The original files are never changed or deleted.
+- DLC installed from the command line (`switchrecomp.py --install-dlc`) shows up in the list by itself.
+- On Linux the engine needs `hactool` on the PATH for DLC, as for NSP builds.
+
+Design, formats and what was verified: [DLC_IN_PLACE.md](DLC_IN_PLACE.md).
+
 To add a game you already compiled, choose **File → Import build…** and select its EXE. The corresponding
 `_code.dll` and `_data` folder must be next to it. On Linux select the extensionless executable with its
 matching `_code.so`. NUP sources are recovered from `_data/romfs.nup` when present.
@@ -77,7 +97,7 @@ with **NSP builds need prod.keys. Use Keys > Install keys first.**
 - **Settings** is at the bottom right of the status bar and remains available through the File menu.
 - Dockable build output, opened by **View → View console** or **Ctrl+L**.
 
-There is no dashboard or permanent inspector. **Properties** holds General, Build, Runtime, and Artwork tabs.
+There is no dashboard or permanent inspector. **Properties** holds General, Build, Runtime, Artwork, and DLC tabs.
 Global tool paths, default build storage, worker count, and backdrop visibility are in **File → Settings**.
 
 **Settings → Appearance** offers Dark/Light and Lime, Mint, Violet, Rose, or Cyan accents. Changes preview
@@ -249,7 +269,7 @@ Verification for these docs (November 15, 2026):
 ## Release integration
 
 The launcher is a frontend, not a replacement for the toolkit. A Windows release should contain this deployed
-Qt folder together with the toolkit's `switchrecomp.py` and its Python modules (`nup.py`, `nsp.py`,
+Qt folder together with the toolkit's `switchrecomp.py` and its Python modules (`nup.py`, `nsp.py`, `dlc.py`,
 `nxloader.py`, `a64.py`, `codegen.py`), the built `runtime_win64_win32.exe`, shader tools and their ABI
 header/licenses, scripts/docs, and the engine's LICENSE.txt/NOTICE.txt. Portable Python/GCC may be installed
 by `scripts/setup.bat`; .NET 10 is required for the live Vulkan shader translator. Game builds stage shader

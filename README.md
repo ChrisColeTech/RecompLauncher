@@ -19,7 +19,7 @@ Everything a build needs ships in the archive: Python, GCC, .NET and the shader 
 
 - **Your own game dumps**: `.nup` packages, supported `.nsp` packages, homebrew `.nro`, or an extracted folder
   with `exefs/main`. No games, keys or firmware are included or downloaded.
-- **`prod.keys`** for `.nsp` builds, installed once with **Keys → Install keys…**. Encrypted, sparse and
+- **`prod.keys`** for `.nsp` builds and for DLC, installed once with **Keys → Install keys…**. Encrypted, sparse and
   update-only NSPs are not supported ([details](docs/NSP_IN_PLACE.md#supported-packages)).
 - **A 64-bit CPU with AVX2** and a GPU driver with Vulkan support. On Linux: Ubuntu 24.04 or newer, with X11 or
   XWayland.
@@ -33,6 +33,14 @@ Everything a build needs ships in the archive: Python, GCC, .NET and the shader 
 3. **Play** — the card's button turns into **Play** (or double-click the card).
 
 ![Building](docs/images/launcher/building.jpg)
+
+### DLC
+
+Select the game, then **Game → Install DLC…** and pick the DLC package: `.nsp`, `.nsz`, `.xci`, `.xcz` or `.nca`
+(a package that holds the game, its update and its DLC together works too). It needs `prod.keys`
+(**Keys → Install keys…**). The DLC is in effect the next time you play; the game's properties → **DLC** lists
+what is installed and removes it (right-click an entry → **Remove**). A package that cannot work, such as one whose
+ticket is tied to another console, is refused with the reason ([details](docs/DLC_IN_PLACE.md)).
 
 ## Good to know
 

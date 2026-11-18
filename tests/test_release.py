@@ -61,7 +61,7 @@ class ReleaseChecks(unittest.TestCase):
             root = self.bundle(platform)
             package.validate_contents(root, platform)
             for name in [(ENGINE / n).as_posix() for n in ('runtime/cpu.h', 'runtime/cpu_helpers.c', 'runtime/nvn/gfx/dmsh_abi.h',
-                         'recomp_cli.py', 'nup.py', 'zbic.py', 'tools/nxshader/s2r_paths.py',
+                         'recomp_cli.py', 'nup.py', 'zbic.py', 'dlc.py', 'tools/nxshader/s2r_paths.py',
                          'tools/nxshader/xlate_bin/dmsh_xlate.runtimeconfig.json', 'bin/' + package.runtime_name(platform))] + [
                          package.launcher_name(platform), 'legal/NOTICE.txt', 'legal/licenses/libvpx/LICENSE-libvpx.txt',
                          'legal/licenses/dav1d/LICENSE-dav1d.txt', 'legal/sources/dav1d-1.5.5.tar.xz',
