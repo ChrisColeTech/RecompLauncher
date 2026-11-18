@@ -1,5 +1,7 @@
 # RecompLauncher
 
+[![Portable release](https://github.com/ChrisColeTech/RecompLauncher/actions/workflows/release.yml/badge.svg?branch=main)](https://github.com/ChrisColeTech/RecompLauncher/actions/workflows/release.yml)
+[![Engine CI](https://github.com/ChrisColeTech/Switch2RECOMP-turbo/actions/workflows/engine-ci.yml/badge.svg?branch=turbo)](https://github.com/ChrisColeTech/Switch2RECOMP-turbo/actions/workflows/engine-ci.yml)
 A game library for the [Switch2RECOMP](https://github.com/ChrisColeTech/Switch2RECOMP-turbo) static recompiler.
 Add your own Switch game dumps, build them into native Windows or Linux games with one click, and play them
 from the same library.
