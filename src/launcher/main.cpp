@@ -55,7 +55,9 @@ int main(int argc, char** argv) {
     parser.addOption({"check-image", "Validate an artwork image using deployed Qt plugins", "file"});
     parser.addOption({"show-appearance", "Open appearance settings"});
     parser.addOption({"show-controller", "Open controller settings"});
-    parser.addOption({"properties-tab", "Tab for --show-properties (0 General, 1 Build, 2 Runtime, 3 Artwork)", "index"});
+    parser.addOption({"properties-tab", "Tab for --show-properties (0 General, 1 Build, 2 Runtime, 3 Artwork, 4 DLC)", "index"});
+    parser.addOption({"install-dlc", "Install a DLC package for the --select-title game and exit (repeatable)", "package"});
+    parser.addOption({"show-menu", "Open a menu of the title bar (File, Game, Keys, View, Help)", "name"});
     parser.addOption({"screenshot", "Save a launcher preview and exit", "png"});
     parser.addOption({"smoke-build", "Build a synthetic test input and exit (diagnostics)", "input"});
     parser.addOption({"build-output", "Output folder for --smoke-build", "directory"});
@@ -72,6 +74,15 @@ int main(int argc, char** argv) {
     if(parser.isSet("list-view")) window.setViewMode(1);
     if(parser.isSet("show-console")) window.showBuildOutput();
     if(parser.isSet("show-properties")) QTimer::singleShot(0,&window,[&window,tab=parser.value("properties-tab").toInt()]{window.showProperties(tab);});
+    if(parser.isSet("install-dlc")) {
+        // the menu action without its file dialog and message boxes; the outcome is the exit code and one line per title or reason
+        QObject::connect(&window,&Window::dlcFinished,&app,[](bool okay,const QString& detail){
+            for(const auto& line:detail.split('\n',Qt::SkipEmptyParts)){if(okay)qInfo("DLC: %s",qPrintable(line));else qCritical("DLC error: %s",qPrintable(line));}
+            QApplication::exit(okay?0:1);
+        });
+        QTimer::singleShot(0,&window,[&]{window.installDlcPackages(parser.values("install-dlc"),false);});
+    }
+    if(parser.isSet("show-menu")) QTimer::singleShot(300,&window,[&window,name=parser.value("show-menu")]{window.showMenu(name);});
     if(parser.isSet("show-filters")) QTimer::singleShot(0,&window,[&window]{window.showFilters();});
     if(parser.isSet("show-appearance")) QTimer::singleShot(0,&window,[&window]{window.showAppearance();});
     if(parser.isSet("show-controller")) QTimer::singleShot(0,&window,[&window]{window.showControllerSettings();});
@@ -88,6 +99,12 @@ int main(int argc, char** argv) {
             QDir().mkpath(QFileInfo(path).absolutePath());
             QWidget* target=QApplication::activeModalWidget();if(!target)target=QApplication::activePopupWidget();if(!target)target=&window;
             auto image=target->grab().toImage();
+            if(parser.isSet("show-menu")&&target!=&window){
+                // a menu is its own top-level window: show it where it hangs, over the main window
+                QImage whole=window.grab().toImage();
+                QPainter painter(&whole);painter.drawImage(window.mapFromGlobal(target->mapToGlobal(QPoint(0,0))),image);painter.end();
+                image=whole;
+            }
             if(image.width()>1600)image=image.scaledToWidth(1600,Qt::SmoothTransformation); image.setDevicePixelRatio(1);
             QApplication::exit(image.save(path)?0:1);
         });

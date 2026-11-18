@@ -92,7 +92,7 @@ QJsonObject Game::json() const {
         {"outputName", outputName}, {"cover", cover}, {"background", background}, {"renderer", renderer}, {"buttonLayout", buttonLayout},
         {"workers", workers}, {"optimization", optimization},
         {"builtSource", builtSource}, {"buildIncomplete", buildIncomplete}, {"lastPlayed", lastPlayed.toString(Qt::ISODate)},
-        {"lastBuilt", lastBuilt.toString(Qt::ISODate)}};
+        {"lastBuilt", lastBuilt.toString(Qt::ISODate)}, {"dlc", QJsonArray::fromStringList(dlc)}};
 }
 Game Game::fromJson(const QJsonObject& o) {
     Game g;
@@ -108,6 +108,12 @@ Game Game::fromJson(const QJsonObject& o) {
     g.buildIncomplete = o["buildIncomplete"].toBool();
     g.lastPlayed = QDateTime::fromString(o["lastPlayed"].toString(), Qt::ISODate);
     g.lastBuilt = QDateTime::fromString(o["lastBuilt"].toString(), Qt::ISODate);
+    for (const auto& value : o["dlc"].toArray()) {
+        const QString path = value.toString();
+        bool known = path.isEmpty();
+        for (const auto& have : g.dlc) known = known || samePath(have, path);
+        if (!known) g.dlc << path;
+    }
     return g;
 }
 
@@ -287,6 +293,80 @@ bool samePath(const QString& left,const QString& right){
 #else
     return normalized(left)==normalized(right);
 #endif
+}
+QVector<DlcTitle> readDlcManifest(const QString& dataDir) {
+    QVector<DlcTitle> titles;
+    QFile file(QDir(dataDir).filePath("dlc.manifest"));
+    if (dataDir.isEmpty() || !file.open(QIODevice::ReadOnly)) return titles;
+    static const QRegularExpression line("^([0-9A-Fa-f]{16})[ \\t]+(\\d+)(?:[ \\t]+(.*))?$");
+    // the storage word is optional: "<id> <version> <package>" is a line too
+    static const QRegularExpression word("^(data|stub)(?:[ \\t]+(.*))?$");
+    for (const auto& raw : QString::fromUtf8(file.readAll()).split('\n')) {
+        const auto match = line.match(raw.trimmed());
+        if (!match.hasMatch()) continue;   // comments, blank lines
+        DlcTitle title;
+        title.titleId = match.captured(1).toLower(); title.version = match.captured(2).toLongLong();
+        QString rest = match.captured(3).trimmed();
+        const auto storage = word.match(rest);
+        if (storage.hasMatch()) { title.stub = storage.captured(1) == "stub"; rest = storage.captured(2).trimmed(); }
+        title.source = rest;
+        titles.append(title);
+    }
+    return titles;
+}
+bool validDlcPackage(const QString& path, QString* error) {
+    const QFileInfo info(path);
+    const QString suffix = info.suffix().toLower();
+    if (!info.isFile()) return fail(error, "The file does not exist: " + path);
+    if (!QStringList{"nsp", "nsz", "xci", "xcz", "nca"}.contains(suffix))
+        return fail(error, info.fileName() + " is not an add-on content package. Select an NSP, NSZ, XCI, XCZ or NCA file.");
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly)) return fail(error, file.errorString());
+    const auto head = file.read(0x1104);
+    const bool package = head.startsWith("PFS0"), card = head.mid(0x100, 4) == "HEAD" || head.mid(0x1100, 4) == "HEAD";
+    if ((suffix == "nsp" || suffix == "nsz") && !package) return fail(error, info.fileName() + " is not a valid NSP/NSZ package (no PFS0 header).");
+    if ((suffix == "xci" || suffix == "xcz") && !card) return fail(error, info.fileName() + " is not a valid XCI/XCZ card image.");
+    if (suffix == "nca" && info.size() < 0xC00) return fail(error, info.fileName() + " is too small to be an NCA.");
+    return true;
+}
+bool dlcUpToDate(const Game& game) {
+    const auto installed = readDlcManifest(game.dataDir());
+    for (const auto& package : game.dlc) {
+        bool found = false;
+        for (const auto& title : installed) found = found || samePath(title.source, package);
+        if (!found) return false;
+    }
+    for (const auto& title : installed) {
+        bool wanted = false;
+        for (const auto& package : game.dlc) wanted = wanted || samePath(title.source, package);
+        if (!wanted) return false;
+    }
+    return true;
+}
+bool adoptInstalledDlc(Game& game) {
+    bool changed = false;
+    for (const auto& title : readDlcManifest(game.dataDir())) {
+        if (title.source.isEmpty()) continue;
+        bool known = false;
+        for (const auto& package : game.dlc) known = known || samePath(package, title.source);
+        if (!known) { game.dlc << QDir::fromNativeSeparators(title.source); changed = true; }
+    }
+    return changed;
+}
+QStringList dlcSyncArguments(const Game& game, const QString& toolRoot) {
+    QStringList arguments{"-u", recompCli(toolRoot), "--sync-dlc"};
+    for (const auto& package : game.dlc) arguments << QDir::toNativeSeparators(package);
+    return arguments << "--datadir" << QDir::toNativeSeparators(game.dataDir());
+}
+QString dlcDescription(const QString& package, const QVector<DlcTitle>& installed, bool built) {
+    QStringList titles;
+    for (const auto& title : installed)
+        if (samePath(title.source, package))
+            titles << title.titleId.toUpper() + (title.version ? QString(" v%1").arg(title.version) : QString{}) + (title.stub ? " (no data)" : "");
+    const QString name = QFileInfo(package).fileName();
+    if (!titles.isEmpty()) return name + " — " + titles.join(", ");
+    if (!QFileInfo::exists(package)) return name + " — file not found";
+    return name + (built ? " — not installed yet" : " — installs when the game is built");
 }
 QString titleForSource(const QString& source) {
     QFileInfo info(source);

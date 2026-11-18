@@ -39,8 +39,13 @@ public:
     void selectTitle(const QString& title);
     void showAppearance();
     void showControllerSettings();
+    void showMenu(const QString& name);   // pops a menu of the title bar open by its name ("Game")
+    // Game > Install DLC… without the file dialog: adds the packages to the selected game and installs them into its
+    // build. Not interactive (--install-dlc): no message boxes, the outcome arrives with dlcFinished.
+    bool installDlcPackages(const QStringList& files, bool interactive = true);
 signals:
     void smokeFinished(bool success);
+    void dlcFinished(bool success, const QString& detail);
     void toolsChanged();
 protected:
     void dragEnterEvent(QDragEnterEvent*) override;
@@ -69,6 +74,9 @@ private:
     void showSettings(int tab = 0);
     void installKeys();
     void removeGame();
+    void installDlc();
+    enum DlcReason { DlcInstalled, DlcBuilt, DlcPlay, DlcChanged };
+    bool startDlcSync(const QString& id, DlcReason reason);
     void showContextMenu(const QPoint& global);
     void showToolPopup();
     void message(const QString& title, const QString& text, bool error = false);
@@ -78,6 +86,9 @@ private:
     Library library;
     Toolchain tools;
     BuildManager builder;
+    DlcInstaller dlcInstaller;
+    DlcReason dlcReason = DlcInstalled;
+    bool dlcQuiet = false;
     QString selectedId, healthText;
     bool demo = false, closing = false, dotnetReady = false;
     int toolsGeneration = 0;
@@ -106,5 +117,5 @@ private:
         *buildAction = nullptr, *stopAction = nullptr, *propertiesAction = nullptr, *removeAction = nullptr,
         *folderAction = nullptr, *logAction = nullptr, *saveFolderAction = nullptr, *settingsAction = nullptr,
         *galleryAction = nullptr, *tableAction = nullptr, *backgroundAction = nullptr, *buildOptionsAction = nullptr,
-        *installKeysAction = nullptr;
+        *installKeysAction = nullptr, *installDlcAction = nullptr;
 };

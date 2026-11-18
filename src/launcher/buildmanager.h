@@ -29,3 +29,26 @@ private:
     Game game;
     bool active = false, cancelled = false;
 };
+
+// Add-on content: runs the engine's --sync-dlc for one built game, after which its data folder holds exactly the
+// packages of Game::dlc (new ones installed, removed ones deleted). Nothing is ever written to the packages.
+class DlcInstaller : public QObject {
+    Q_OBJECT
+public:
+    explicit DlcInstaller(QObject* parent = nullptr);
+    bool start(const Game& game, const Toolchain& tools, QString* error);
+    bool busy() const { return active; }
+    QString gameId() const { return game.id; }
+signals:
+    void output(const QString& text);
+    // errors: the engine's "DLC error: ..." lines without the prefix, one per package that was refused
+    void finished(const QString& id, bool success, const QStringList& errors);
+private:
+    void readOutput();
+    void complete(bool success);
+    QProcess process;
+    QByteArray pending;
+    QStringList errors;
+    Game game;
+    bool active = false;
+};

@@ -1,13 +1,19 @@
 // RecompLauncher - native game library and build launcher.
 // The vendored Switch2RECOMP engine keeps its AGPL-3.0 notices under third_party/Switch2RECOMP.
+#include "dlcpanel.h"
 #include "filterpopup.h"
+#include "window.h"
 #include "theme.h"
 #include "titlebar.h"
 #include <QMainWindow>
 #include <QMenuBar>
 #include <QApplication>
 #include <QComboBox>
+#include <QLabel>
 #include <QLineEdit>
+#include <QListWidget>
+#include <QMenu>
+#include <QTemporaryDir>
 #include <QPushButton>
 #include <QToolButton>
 #include <QSignalSpy>
@@ -55,6 +61,41 @@ private slots:
         const QImage glyph=Theme::accentGlyph(QColor("#ff9cbd"),18,3).toImage();QCOMPARE(glyph.size(),QSize(54,54));
         QCOMPARE(qAlpha(glyph.pixel(27,32)),0);                                                // controller body is cut out
         Theme::apply(*qApp,"dark","lime");
+    }
+    void gameMenuInstallsDlc(){
+        // demo mode: a preview library that is never saved, no game processes are looked for
+        // The main window lives as long as the process (its tool checks run in the background), so it is not destroyed here.
+        QTemporaryDir tmp;auto& window=*new Window(tmp.filePath("library.json"),tmp.path(),true);
+        auto* bar=window.findChild<TitleBar*>();QVERIFY(bar);
+        QMenu* game=nullptr;for(auto* action:bar->menuBar()->actions())if(action->text()=="&Game")game=action->menu();
+        QVERIFY(game);QStringList names;for(auto* action:game->actions())names<<(action->isSeparator()?"-":action->text());
+        QCOMPARE(names,QStringList({"Play","Stop","Build","-","Install DLC…","-","Remove from library…"}));
+        auto* install=window.findChild<QAction*>("InstallDlc");QVERIFY(install);QVERIFY(game->actions().contains(install));
+        QVERIFY(!install->isEnabled());                       // the preview library has nothing to install into
+        window.show();QVERIFY(QTest::qWaitForWindowExposed(&window));
+        window.showMenu("game");QTRY_VERIFY(game->isVisible());game->close();window.hide();
+    }
+    void propertiesListAndRemoveDlc(){
+        QTemporaryDir tmp;Game game;game.id="g";game.title="Kart";game.outputName="Kart";game.buildDir=tmp.filePath("build");
+        QDir().mkpath(game.dataDir());
+        for(const auto& path:{game.executable(),game.codeModule()}){QFile f(path);QVERIFY(f.open(QIODevice::WriteOnly));f.write("fixture");}
+        const QString booster=tmp.filePath("Booster [v65536].nsp"),later=tmp.filePath("Later.nsz");
+        for(const auto& path:{booster,later}){QFile f(path);QVERIFY(f.open(QIODevice::WriteOnly));f.write("PFS0");}
+        {QFile f(game.dataDir()+"/dlc.manifest");QVERIFY(f.open(QIODevice::WriteOnly));f.write(("0100152000023001 65536 data "+booster+"\n").toUtf8());}
+        game.dlc={booster,later};
+        DlcPanel panel(game,false);
+        QCOMPARE(panel.list->count(),2);
+        QCOMPARE(panel.list->item(0)->text(),QString("Booster [v65536].nsp — 0100152000023001 v65536"));
+        QCOMPARE(panel.list->item(1)->text(),QString("Later.nsz — not installed yet"));
+        QCOMPARE(panel.list->item(0)->toolTip(),QDir::toNativeSeparators(booster));
+        QVERIFY(panel.note->text().contains("Remove"));
+        panel.show();QVERIFY(QTest::qWaitForWindowExposed(&panel));
+        panel.list->setFocus();panel.list->setCurrentRow(0);QTest::keyClick(panel.list,Qt::Key_Delete);      // Delete removes the entry
+        QCOMPARE(panel.packages(),QStringList(later));QCOMPARE(panel.list->count(),1);
+        panel.removeRow(0);QVERIFY(panel.packages().isEmpty());QVERIFY(panel.note->text().contains("Game > Install DLC"));
+        panel.removeRow(0);QVERIFY(panel.packages().isEmpty());
+        // a running or building game: the list shows, nothing can be removed
+        DlcPanel locked(game,true);locked.removeRow(0);QCOMPARE(locked.packages(),game.dlc);QVERIFY(locked.note->text().contains("cannot be changed"));
     }
     void escapeClosesPopup(){
         QWidget owner;QPushButton anchor("Find games",&owner);owner.resize(400,300);anchor.resize(100,70);owner.show();

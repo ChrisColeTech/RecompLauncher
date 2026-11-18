@@ -2,6 +2,7 @@
 // The vendored Switch2RECOMP engine keeps its AGPL-3.0 notices under third_party/Switch2RECOMP.
 #include "window.h"
 #include "artwork.h"
+#include "dlcpanel.h"
 #include "filterpopup.h"
 #include "theme.h"
 #include "titlebar.h"
@@ -127,7 +128,7 @@ QFormLayout* tabForm(QTabWidget* tabs,const QString& name) {
 }
 }
 
-Window::Window(const QString& file,const QString& root,bool isDemo):library(file),builder(this),demo(isDemo) {
+Window::Window(const QString& file,const QString& root,bool isDemo):library(file),builder(this),dlcInstaller(this),demo(isDemo) {
     setWindowTitle("RecompLauncher");resize(1280,800);setMinimumSize(920,600);setAcceptDrops(true);
     setDockOptions(QMainWindow::AllowTabbedDocks|QMainWindow::AnimatedDocks);
     QString error;library.load(&error);
@@ -159,6 +160,30 @@ Window::Window(const QString& file,const QString& root,bool isDemo):library(file
         progress->hide();jobLabel->setText(okay?"Build complete — ready to play":"Build stopped — see output");
         refreshLibrary();emit smokeFinished(okay);
         if(closing)QTimer::singleShot(0,this,&QWidget::close);
+        // a fresh build gets the game's DLC put (back) into its data folder
+        else if(okay){const auto* built=library.find(id);if(built&&!built->dlc.isEmpty())startDlcSync(id,DlcBuilt);}
+    });
+    connect(&dlcInstaller,&DlcInstaller::output,console,&QPlainTextEdit::appendPlainText);
+    connect(&dlcInstaller,&DlcInstaller::finished,this,[this](const QString& id,bool,const QStringList& errors){
+        progress->hide();
+        auto* game=library.find(id);if(!game){jobLabel->clear();refreshLibrary();return;}
+        // what the data folder holds now is the truth: a package the engine refused leaves the list
+        const auto installed=readDlcManifest(game->dataDir());
+        QStringList kept,titles;
+        for(const auto& package:game->dlc){bool found=false;for(const auto& title:installed)found=found||samePath(title.source,package);if(found)kept<<package;}
+        for(const auto& title:installed)titles<<title.titleId.toUpper()+(title.version?QString(" v%1").arg(title.version):QString{});
+        game->dlc=kept;save();refreshLibrary();
+        const bool quiet=dlcQuiet;dlcQuiet=false;
+        if(!errors.isEmpty()){
+            jobLabel->setText("DLC was not installed — see the message");
+            if(quiet)emit dlcFinished(false,errors.join("\n"));else message("DLC could not be installed",errors.join("\n\n"),true);
+            return;
+        }
+        jobLabel->setText(installed.isEmpty()?"DLC removed":QString("DLC installed — %1 title%2").arg(installed.size()).arg(installed.size()==1?"":"s"));
+        if(quiet){emit dlcFinished(true,titles.join("\n"));return;}
+        if(dlcReason==DlcInstalled&&!installed.isEmpty())
+            message("DLC installed",game->title+" now has this add-on content:\n\n"+titles.join("\n")+"\n\nIt is in effect the next time you play. Game > Properties > DLC lists it and removes it.");
+        if(dlcReason==DlcPlay&&dlcUpToDate(*game)){selectGame(id);play();}
     });
     new QShortcut(QKeySequence("Ctrl+F"),this,[this]{showFilters();});
     auto* galleryEnter=new QShortcut(QKeySequence(Qt::Key_Return),gallery,[this]{activateGame();});galleryEnter->setContext(Qt::WidgetShortcut);
@@ -198,6 +223,8 @@ void Window::createActions(){
     saveFolderAction=new QAction("Open save folder",this);connect(saveFolderAction,&QAction::triggered,this,[this]{openFolder(true);});
     logAction=make("View game log","log","Open the runtime log");connect(logAction,&QAction::triggered,this,[this]{openGameFile(".log");});
     removeAction=new QAction("Remove from library…",this);connect(removeAction,&QAction::triggered,this,&Window::removeGame);
+    installDlcAction=new QAction("Install DLC…",this);installDlcAction->setObjectName("InstallDlc");
+    installDlcAction->setToolTip("Install add-on content for the selected game (NSP, NSZ, XCI, XCZ, NCA)");connect(installDlcAction,&QAction::triggered,this,&Window::installDlc);
     auto* group=new QActionGroup(this);group->setExclusive(true);
     galleryAction=make("Gallery","grid","Cover gallery");tableAction=make("List","list","Sortable details list");
     for(auto* a:{galleryAction,tableAction}){a->setCheckable(true);group->addAction(a);}
@@ -216,7 +243,7 @@ void Window::createMenusAndToolbar(){
     auto* file=menus->addMenu("&File");file->addAction(addAction);file->addAction(addFolderAction);file->addAction(importAction);
     file->addSeparator();file->addAction(settingsAction);
     file->addSeparator();file->addAction("Exit",QKeySequence("Alt+F4"),this,&QWidget::close);
-    auto* game=menus->addMenu("&Game");game->addAction(playAction);game->addAction(stopAction);game->addAction(buildAction);game->addSeparator();game->addAction(removeAction);
+    auto* game=menus->addMenu("&Game");game->addAction(playAction);game->addAction(stopAction);game->addAction(buildAction);game->addSeparator();game->addAction(installDlcAction);game->addSeparator();game->addAction(removeAction);
     auto* keys=menus->addMenu("&Keys");keys->addAction(installKeysAction);keys->addAction("Open keys folder",this,[this]{const auto path=QFileInfo(library.keysPath).absolutePath();if(QDir(path).exists())QDesktopServices::openUrl(QUrl::fromLocalFile(path));});
     auto* view=menus->addMenu("&View");view->setObjectName("ViewMenu");view->addAction(galleryAction);view->addAction(tableAction);view->addSeparator();view->addAction(filterAction);view->addAction(backgroundAction);
     view->addAction("Refresh library",QKeySequence("F5"),this,[this]{invalidateArtwork();refreshTools();refreshLibrary();});
@@ -352,6 +379,7 @@ void Window::refreshSelection(){
     buildAction->setEnabled(exists&&!demo&&!builder.busy()&&!playing&&g->sourceAvailable()&&tools.canBuild()&&!g->hasBuild());
     stopAction->setEnabled(building||playing);stopAction->setText(building?"Cancel build":"Stop");
     propertiesAction->setEnabled(exists);buildOptionsAction->setEnabled(exists&&!playing&&!building);removeAction->setEnabled(exists&&!playing&&!building);
+    installDlcAction->setEnabled(exists&&!demo&&!playing&&!building&&!dlcInstaller.busy());
     folderAction->setEnabled(exists);saveFolderAction->setEnabled(exists&&g->hasBuild());logAction->setEnabled(exists&&QFileInfo(QDir(g->buildDir).filePath(g->outputName+".log")).exists());
     const QString info=g?g->title+" · "+g->format()+" · "+g->renderer:"No selection";
     selectionLabel->setText(fontMetrics().elidedText(info,Qt::ElideRight,390));selectionLabel->setToolTip(g?info+"\n"+displayPath(g->source):info);
@@ -365,6 +393,50 @@ void Window::setViewMode(int mode){
     if(gallery&&table&&(!filters||!filters->isVisible())){if(library.viewMode==0)gallery->setFocus();else table->setFocus();}
 }
 void Window::showBuildOutput(){buildDock->show();resizeDocks({buildDock},{190},Qt::Vertical);buildDock->raise();}
+void Window::showMenu(const QString& name){
+    for(auto* action:menus->actions())if(action->menu()&&action->text().remove('&').compare(name,Qt::CaseInsensitive)==0){
+        action->menu()->popup(menus->mapToGlobal(menus->actionGeometry(action).bottomLeft()));return;
+    }
+}
+// Game > Install DLC…: the packages join the game's list; a built game gets them installed right away (the engine
+// reads the package and refuses, with the reason, what it cannot install), an unbuilt one when its build finishes.
+void Window::installDlc(){
+    auto* game=selected();if(!game||demo)return;
+    const QString id=game->id;
+    if(running.contains(id)||(builder.busy()&&builder.gameId()==id)||dlcInstaller.busy()){message("Game is busy","Wait for this game's build, run or DLC installation to finish first.");return;}
+    const QString start=game->dlc.isEmpty()?QFileInfo(game->source).absolutePath():QFileInfo(game->dlc.last()).absolutePath();
+    const auto files=QFileDialog::getOpenFileNames(this,"Install DLC — "+game->title,start,dlcFileFilter);
+    if(!files.isEmpty())installDlcPackages(files);
+}
+bool Window::installDlcPackages(const QStringList& files,bool interactive){
+    // not interactive: the reason goes to dlcFinished instead of a message box
+    const auto say=[this,interactive](const QString& title,const QString& text,bool error){if(interactive)message(title,text,error);else emit dlcFinished(!error,text);};
+    auto* game=selected();if(!game||demo){say("Cannot install DLC","Select a game first.",true);return false;}
+    const QString id=game->id;
+    if(running.contains(id)||(builder.busy()&&builder.gameId()==id)||dlcInstaller.busy()){say("Game is busy","Wait for this game's build, run or DLC installation to finish first.",true);return false;}
+    if(adoptInstalledDlc(*game))save();
+    QStringList added,problems;
+    for(const auto& file:files){
+        const QString path=QFileInfo(file).absoluteFilePath();QString error;
+        bool known=false;for(const auto& have:game->dlc+added)known=known||samePath(have,path);
+        if(known)continue;
+        if(validDlcPackage(path,&error))added<<path;else problems<<error;
+    }
+    if(!problems.isEmpty()){say("Cannot install DLC",problems.join("\n"),true);if(!interactive)return false;}
+    if(added.isEmpty()){if(problems.isEmpty())say("DLC already installed","Those packages are already in this game's DLC list (Properties > DLC).",false);return problems.isEmpty();}
+    game->dlc+=added;save();
+    if(!game->hasBuild()){say("DLC added",QString("%1 package%2 added. The DLC is installed when %3 is built.").arg(added.size()).arg(added.size()==1?"":"s").arg(game->title),false);return true;}
+    dlcQuiet=!interactive;
+    if(startDlcSync(id,DlcInstalled))return true;
+    game=library.find(id);if(game){for(const auto& path:added)game->dlc.removeAll(path);save();}
+    return false;
+}
+bool Window::startDlcSync(const QString& id,DlcReason reason){
+    const auto* game=library.find(id);if(!game)return false;
+    QString error;if(!dlcInstaller.start(*game,tools,&error)){const bool quiet=dlcQuiet;dlcQuiet=false;if(quiet)emit dlcFinished(false,error);else message("Cannot install DLC",error,true);return false;}
+    dlcReason=reason;jobLabel->setText(game->dlc.isEmpty()?"Removing DLC…":"Installing DLC…");progress->setVisible(true);progress->setRange(0,0);
+    console->appendPlainText("\nDLC: "+game->title);refreshSelection();return true;
+}
 void Window::showFilters(){if(filters&&filterAnchor)filters->openBelow(filterAnchor);}
 void Window::installKeys(){
     const QString source=QFileDialog::getOpenFileName(this,"Install Nintendo keys",{},"Nintendo key file (prod.keys);;All files (*)");if(source.isEmpty())return;
@@ -438,8 +510,9 @@ bool Window::editGame(Game& game,int tab,bool adding){
     artwork->addRow("Cover image",browseField(cover,&dialog,"Choose cover","Images (*.png *.jpg *.jpeg *.webp *.bmp)"));
     artwork->addRow("Background image",browseField(background,&dialog,"Choose background artwork","Images (*.png *.jpg *.jpeg *.webp *.bmp)"));
     auto* note=textLabel("The background follows your selected game and is dimmed behind the gallery. Leave it empty to use the cover. Clear both paths to restore generated artwork.","Muted");note->setWordWrap(true);artwork->addRow(note);
+    DlcPanel* dlc=nullptr;if(!adding){dlc=new DlcPanel(game,locked||dlcInstaller.busy());tabs->addTab(dlc,"DLC");}
     tabs->widget(1)->setEnabled(!locked);tabs->widget(2)->setEnabled(!locked);
-    tabs->setCurrentIndex(qBound(0,tab,3));
+    tabs->setCurrentIndex(qBound(0,tab,tabs->count()-1));
     auto* buttons=new QDialogButtonBox(QDialogButtonBox::Ok|QDialogButtonBox::Cancel);if(adding)buttons->button(QDialogButtonBox::Ok)->setText("Add game");layout->addWidget(buttons);
     connect(buttons,&QDialogButtonBox::rejected,&dialog,&QDialog::reject);
     connect(buttons,&QDialogButtonBox::accepted,&dialog,[&]{
@@ -451,24 +524,31 @@ bool Window::editGame(Game& game,int tab,bool adding){
         game.buildDir=QFileInfo(QDir::fromNativeSeparators(destination->text().trimmed())).absoluteFilePath();
         if(adding)game.outputName=outputNameFor(name->text());game.workers=workers->value();game.optimization=optimization->currentIndex();game.renderer=renderer->currentData().toString();game.buttonLayout=buttonLayout->currentData().toString();
         game.cover=QDir::fromNativeSeparators(cover->text().trimmed());game.background=QDir::fromNativeSeparators(background->text().trimmed());
+        if(dlc)game.dlc=dlc->packages();
         if(hasIni&&screenMode->currentData().toBool()!=wasDocked){QString error;if(!writeDocked(game.iniPath(),screenMode->currentData().toBool(),&error)){QMessageBox::warning(&dialog,"Cannot save game settings",error);return;}}
         dialog.accept();
     });
     return dialog.exec()==QDialog::Accepted;
 }
 void Window::showProperties(int tab){
-    auto* game=selected();if(!game)return;const auto id=game->id;Game edited=*game;
+    auto* game=selected();if(!game)return;const auto id=game->id;
+    if(adoptInstalledDlc(*game))save();
+    Game edited=*game;
     if(editGame(edited,tab)){
+        bool dlcChanged=false;
         if(auto* current=library.find(id)){
             current->title=edited.title;current->source=edited.source;current->buildDir=edited.buildDir;
             current->renderer=edited.renderer;current->workers=edited.workers;current->optimization=edited.optimization;
             current->cover=edited.cover;current->background=edited.background;
+            dlcChanged=current->dlc!=edited.dlc;current->dlc=edited.dlc;
             const bool layoutChanged=current->buttonLayout!=edited.buttonLayout;current->buttonLayout=edited.buttonLayout;
             // already-built games get the new layout in their INI now, not only at the next Play
             QString error;if(layoutChanged&&current->hasBuild()&&!writeButtonLayout(current->iniPath(),effectiveButtonLayout(*current,library.buttonLayout),&error))
                 message("Cannot save game settings",error,true);
         }
         invalidateArtwork();save();refreshLibrary();
+        // removed DLC leaves the built game's data folder now, not at the next Play
+        if(dlcChanged){const auto* current=library.find(id);if(current&&current->hasBuild())startDlcSync(id,DlcChanged);}
     }
 }
 void Window::showAppearance(){showSettings(3);}
@@ -543,6 +623,10 @@ void Window::play(){
     if(game->renderer=="vulkan"&&!QFileInfo(QDir(game->buildDir).filePath("tools/nxshader/nxs_live.py")).exists()){
         message("Shader tools are missing","Rebuild this game with the current engine to stage its Vulkan shader tools before playing.",true);return;
     }
+    // add-on content: the data folder has to hold the game's DLC list before the game starts
+    if(dlcInstaller.busy())return;
+    if(adoptInstalledDlc(*game))save();
+    if(!dlcUpToDate(*game)){startDlcSync(game->id,DlcPlay);return;}
     QString error;if(!writeGameSettings(*game,library.buttonLayout,&error)){message("Cannot save game settings",error,true);return;}
     QProcess process;process.setProgram(game->executable());process.setWorkingDirectory(game->buildDir);auto env=tools.environment();
     process.setProcessEnvironment(env);qint64 pid=0;if(!process.startDetached(&pid)){message("Could not launch",process.errorString(),true);return;}

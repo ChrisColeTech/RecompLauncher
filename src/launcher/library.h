@@ -24,6 +24,7 @@ struct Game {
     QString renderer = "vulkan";
     QString buttonLayout; // Empty inherits the launcher default (Settings > Controller).
     QString builtSource;
+    QStringList dlc; // Add-on content packages (absolute paths) installed with Game > Install DLC….
     bool buildIncomplete = false;
     int workers = 0; // Zero inherits the launcher default.
     int optimization = 2;
@@ -90,6 +91,30 @@ QString readRenderer(const QString& ini);
 bool readDocked(const QString& ini);
 bool writeDocked(const QString& ini, bool docked, QString* error);
 bool samePath(const QString& left, const QString& right);
+
+// Add-on content (DLC). The engine installs a package into the built game's data folder (switchrecomp.py
+// --install-dlc / --sync-dlc: <data>/dlc.manifest plus <data>/dlc/<title id>/); the launcher keeps the list of
+// packages in Game::dlc and has the engine bring the data folder in line after a build and before Play.
+inline constexpr auto dlcFileFilter = "Add-on content (*.nsp *.nsz *.xci *.xcz *.nca);;All files (*)";
+struct DlcTitle {
+    QString titleId; // 16 hex digits
+    qint64 version = 0;
+    bool stub = false; // installed without its data (diagnostics only)
+    QString source;    // the package it was installed from
+};
+// The titles installed in a built game's data folder (the lines of dlc.manifest); empty when there is none.
+QVector<DlcTitle> readDlcManifest(const QString& dataDir);
+// A quick look at the file itself: one of the package types the engine installs, with the right signature.
+bool validDlcPackage(const QString& path, QString* error);
+// True when every package in game.dlc is installed in the data folder and nothing else is.
+bool dlcUpToDate(const Game& game);
+// Adds packages that are installed in the data folder but missing from game.dlc (installed from the command
+// line, or by a launcher whose library file was since overwritten). Returns true when the list changed.
+bool adoptInstalledDlc(Game& game);
+// The engine arguments (after the Python interpreter) that make the data folder match game.dlc.
+QStringList dlcSyncArguments(const Game& game, const QString& toolRoot);
+// "Booster Course.nsp — 0100152000023001 v65536" for the Properties list.
+QString dlcDescription(const QString& package, const QVector<DlcTitle>& installed, bool built);
 bool inPlacePackage(const QString& path);
 QString toolkitProjectRoot(const QString& toolRoot);
 QStringList switchrSearchRoots(const QString& toolRoot);

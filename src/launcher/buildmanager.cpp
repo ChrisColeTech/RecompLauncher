@@ -109,3 +109,51 @@ void BuildManager::cancel() {
 #endif
     QTimer::singleShot(5000, this, [this] { if (cancelled && active) process.kill(); });
 }
+
+DlcInstaller::DlcInstaller(QObject* parent) : QObject(parent) {
+    process.setProcessChannelMode(QProcess::MergedChannels);
+    connect(&process, &QProcess::readyReadStandardOutput, this, &DlcInstaller::readOutput);
+    connect(&process, &QProcess::errorOccurred, this, [this](QProcess::ProcessError error) {
+        if (error == QProcess::FailedToStart) { errors << process.errorString(); complete(false); }
+    });
+    connect(&process, qOverload<int, QProcess::ExitStatus>(&QProcess::finished), this,
+            [this](int code, QProcess::ExitStatus status) {
+        readOutput();
+        if (!pending.isEmpty()) { pending += '\n'; readOutput(); }
+        const bool okay = status == QProcess::NormalExit && code == 0 && errors.isEmpty();
+        if (!okay && errors.isEmpty()) errors << QString("The engine stopped (exit %1). See the console for details.").arg(code);
+        complete(okay);
+    });
+}
+bool DlcInstaller::start(const Game& next, const Toolchain& tools, QString* error) {
+    if (active) { *error = "Another DLC installation is already running."; return false; }
+    if (tools.root.isEmpty() || tools.python.isEmpty()) { *error = tools.problem().isEmpty() ? "Python is missing." : tools.problem(); return false; }
+    if (!QDir(next.dataDir()).exists()) { *error = "Build the game first: DLC is installed into its data folder."; return false; }
+    if (!next.dlc.isEmpty() && (tools.keys.isEmpty() || !QFileInfo(tools.keys).isFile())) {
+        *error = "Installing DLC needs prod.keys. Use Keys > Install keys first."; return false;
+    }
+    game = next; pending.clear(); errors.clear();
+    auto env = tools.environment();
+    env.insert("PYTHONUTF8", "1"); env.insert("PYTHONUNBUFFERED", "1");
+    process.setProcessEnvironment(env);
+    process.setWorkingDirectory(tools.root);
+    active = true;
+    process.start(tools.python, dlcSyncArguments(game, tools.root));
+    return true;
+}
+void DlcInstaller::readOutput() {
+    pending += process.readAllStandardOutput();
+    int pos;
+    while ((pos = pending.indexOf('\n')) >= 0) {
+        const QString line = QString::fromUtf8(pending.left(pos)).trimmed();
+        pending.remove(0, pos + 1);
+        if (line.isEmpty()) continue;
+        if (line.startsWith("DLC error: ")) errors << line.mid(11);
+        emit output(line);
+    }
+}
+void DlcInstaller::complete(bool success) {
+    if (!active) return;
+    active = false;
+    emit finished(game.id, success, errors);
+}

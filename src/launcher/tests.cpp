@@ -6,7 +6,9 @@
 #include <QColor>
 #include <QDir>
 #include <QFile>
+#include <QJsonArray>
 #include <QJsonDocument>
+#include <QSignalSpy>
 #include <QScopeGuard>
 #include <QTemporaryDir>
 #include <QtTest>
@@ -195,6 +197,94 @@ private slots:
         QCOMPARE(perGame[perGame.indexOf("--jobs")+1],QString("3"));
         QCOMPARE(perGame[perGame.indexOf("-O")+1],QString("1"));
     }
+    // A built game on disk: executable, code module, data folder with exefs/, source marked as built.
+    static Game builtGame(const QTemporaryDir& tmp) {
+        Game game; game.id="g"; game.title="Kart"; game.outputName="Kart"; game.buildDir=tmp.filePath("Build output");
+        QDir().mkpath(game.dataDir()+"/exefs");
+        for(const auto& path:{game.executable(),game.codeModule()}){QFile f(path);f.open(QIODevice::WriteOnly);f.write("fixture");}
+        return game;
+    }
+    static void writeFile(const QString& path,const QByteArray& bytes){QDir().mkpath(QFileInfo(path).absolutePath());QFile f(path);QVERIFY(f.open(QIODevice::WriteOnly|QIODevice::Truncate));f.write(bytes);}
+    void dlcListRoundTrip() {
+        QTemporaryDir tmp; const QString file=tmp.filePath("library.json");
+        Library lib(file); Game game=gameFromSource(tmp.filePath("Kart [v0].nsp"));
+        game.dlc={"P:/Games/Kart/Booster [0100152000023001][v65536].nsp","P:/Games/Kart/Kart (1G+1U+1D).nsp"};
+        lib.add(game); QString error; QVERIFY2(lib.save(&error),qPrintable(error));
+        Library loaded(file); QVERIFY(loaded.load(&error)); QCOMPARE(loaded.games.front().dlc,game.dlc);
+        // a library written before DLC existed loads with none; the same package twice is one entry; junk is dropped
+        QVERIFY(Game::fromJson({{"id","x"},{"title","Old"}}).dlc.isEmpty());
+        const auto twice=Game::fromJson({{"dlc",QJsonArray{"P:/a/dlc.nsp","P:\\a\\DLC.nsp","",7,"P:/a/other.nsz"}}});
+#ifdef Q_OS_WIN
+        QCOMPARE(twice.dlc,QStringList({"P:/a/dlc.nsp","P:/a/other.nsz"}));
+#else
+        QCOMPARE(twice.dlc.size(),3);
+#endif
+        QVERIFY(Game().json().contains("dlc"));
+    }
+    void dlcManifestAndState() {
+        QTemporaryDir tmp; Game game=builtGame(tmp); QVERIFY(game.hasBuild());
+        const QString booster=tmp.filePath("Booster [0100152000023001][v65536].nsp"),combined=tmp.filePath("Kart (1G+1U+1D).nsp");
+        QVERIFY(readDlcManifest(game.dataDir()).isEmpty()); QVERIFY(dlcUpToDate(game));       // no DLC, no manifest
+        game.dlc={booster}; QVERIFY(!dlcUpToDate(game));                                         // listed, not installed yet
+        QCOMPARE(dlcDescription(booster,{},true),QString("Booster [0100152000023001][v65536].nsp — file not found"));
+        writeFile(booster,"PFS0"); writeFile(combined,"PFS0");
+        QCOMPARE(dlcDescription(booster,{},true),QString("Booster [0100152000023001][v65536].nsp — not installed yet"));
+        QCOMPARE(dlcDescription(booster,{},false),QString("Booster [0100152000023001][v65536].nsp — installs when the game is built"));
+        writeFile(game.dataDir()+"/dlc.manifest",("# SwitchRecomp add-on content: <title id> <version> <data|stub> <package>\r\n"
+            "0100152000023001 65536 data "+QDir::toNativeSeparators(booster)+"\r\n"
+            "\r\nnot a manifest line\r\n"
+            "0100152000023002 3 "+combined+"\n"                                              // the three-column form
+            "0100152000023003 0 stub "+combined+"\n").toUtf8());
+        const auto titles=readDlcManifest(game.dataDir()); QCOMPARE(titles.size(),3);
+        QCOMPARE(titles[0].titleId,QString("0100152000023001")); QCOMPARE(titles[0].version,qint64(65536)); QVERIFY(!titles[0].stub);
+        QVERIFY(samePath(titles[0].source,booster)); QVERIFY(samePath(titles[1].source,combined)); QVERIFY(!titles[1].stub);
+        QVERIFY(titles[2].stub); QCOMPARE(titles[2].version,qint64(0));
+        QCOMPARE(dlcDescription(booster,titles,true),QString("Booster [0100152000023001][v65536].nsp — 0100152000023001 v65536"));
+        QCOMPARE(dlcDescription(combined,titles,true),QString("Kart (1G+1U+1D).nsp — 0100152000023002 v3, 0100152000023003 (no data)"));
+        QVERIFY(!dlcUpToDate(game));                                                              // the combined package is installed but not listed
+        QVERIFY(adoptInstalledDlc(game)); QCOMPARE(game.dlc.size(),2); QVERIFY(samePath(game.dlc[1],combined));
+        QVERIFY(!adoptInstalledDlc(game)); QVERIFY(dlcUpToDate(game));
+        game.dlc.removeLast(); QVERIFY(!dlcUpToDate(game));                                       // removed in Properties: the data folder is behind
+        const auto args=dlcSyncArguments(game,"D:/Engine path");
+        QCOMPARE(args.mid(0,3),QStringList({"-u",recompCli("D:/Engine path"),"--sync-dlc"}));
+        QCOMPARE(args.mid(3),QStringList({QDir::toNativeSeparators(booster),"--datadir",QDir::toNativeSeparators(game.dataDir())}));
+        game.dlc.clear(); QCOMPARE(dlcSyncArguments(game,"D:/Engine path").mid(2),QStringList({"--sync-dlc","--datadir",QDir::toNativeSeparators(game.dataDir())}));
+    }
+    void dlcPackagesAreCheckedBeforeTheEngineRuns() {
+        QTemporaryDir tmp; QString error;
+        QByteArray card(0x200,'\0'); card.replace(0x100,4,"HEAD"); QByteArray dumped(0x1200,'\0'); dumped.replace(0x1100,4,"HEAD");
+        const QList<QPair<QString,QByteArray>> good{{"a.nsp","PFS0...."},{"b.NSZ","PFS0...."},{"c.xci",card},{"d.xcz",dumped},{"e.nca",QByteArray(0xC00,'x')}};
+        for(const auto& item:good){writeFile(tmp.filePath(item.first),item.second);QVERIFY2(validDlcPackage(tmp.filePath(item.first),&error),qPrintable(item.first+": "+error));}
+        const QList<QPair<QString,QByteArray>> bad{{"notes.txt","PFS0"},{"game.nup","NUP\1"},{"f.nsp","HEAD"},{"g.xci","PFS0"},{"h.nca","tiny"}};
+        for(const auto& item:bad){writeFile(tmp.filePath(item.first),item.second);error.clear();QVERIFY2(!validDlcPackage(tmp.filePath(item.first),&error),qPrintable(item.first));QVERIFY(!error.isEmpty());}
+        QVERIFY(!validDlcPackage(tmp.filePath("missing.nsp"),&error)); QVERIFY(!validDlcPackage(tmp.path(),&error));
+        for(const auto& suffix:{"nsp","nsz","xci","xcz","nca"})QVERIFY(QString(dlcFileFilter).contains(QString("*.")+suffix));
+    }
+    void dlcInstallerRunsTheEngineSync() {
+        // this test binary stands in for Python + the engine: see main() below
+        QTemporaryDir tmp; Game game=builtGame(tmp);
+        Toolchain tools; tools.root=tmp.path(); tools.python=QCoreApplication::applicationFilePath(); tools.keys=tmp.filePath("prod.keys");
+        const QString good=tmp.filePath("Booster pack.nsp"),refused=tmp.filePath("refused.nsp");
+        game.dlc={good,refused};
+        DlcInstaller installer; QString error;
+        QVERIFY(!installer.start(game,tools,&error)); QVERIFY(error.contains("prod.keys"));     // no keys: say so before starting anything
+        writeFile(tools.keys,"header_key = 00");
+        QSignalSpy finished(&installer,&DlcInstaller::finished); QStringList lines;
+        connect(&installer,&DlcInstaller::output,this,[&lines](const QString& line){lines<<line;});
+        QVERIFY2(installer.start(game,tools,&error),qPrintable(error)); QVERIFY(installer.busy());
+        QVERIFY(!installer.start(game,tools,&error));                                            // one at a time
+        QVERIFY(finished.wait(15000)); QVERIFY(!installer.busy());
+        QCOMPARE(finished[0][0].toString(),game.id); QCOMPARE(finished[0][1].toBool(),false);
+        QCOMPARE(finished[0][2].toStringList(),QStringList("refused.nsp: the ticket is bound to one console"));
+        QVERIFY(lines.contains("DLC: installed 0100152000023001 v65536"));
+        const auto titles=readDlcManifest(game.dataDir()); QCOMPARE(titles.size(),1); QVERIFY(samePath(titles[0].source,good));
+        game.dlc={good}; QVERIFY(dlcUpToDate(game));
+        finished.clear(); QVERIFY(installer.start(game,tools,&error)); QVERIFY(finished.wait(15000));
+        QCOMPARE(finished[0][1].toBool(),true); QVERIFY(finished[0][2].toStringList().isEmpty());
+        // not built: nothing to install into
+        Game unbuilt; unbuilt.buildDir=tmp.filePath("nowhere"); unbuilt.outputName="X"; unbuilt.dlc={good};
+        QVERIFY(!installer.start(unbuilt,tools,&error)); QVERIFY(error.contains("Build the game first"));
+    }
     void importChecksAllArtifacts() {
         QTemporaryDir tmp; const QString exe=tmp.filePath(QString("My Game")+executableSuffix); QString error; Game g;
         {QFile f(exe); QVERIFY(f.open(QIODevice::WriteOnly)); f.write("test");}
@@ -244,6 +334,18 @@ private slots:
 int main(int argc,char** argv) {
     // copied into fixture tool directories to exercise executable probes without another Python installation
     if(argc>1&&QByteArray(argv[1])=="-c")return 0;
+    // ...and the engine's --sync-dlc (dlcInstallerRunsTheEngineSync): every package but "refused" gets a manifest line
+    if(argc>3&&QByteArray(argv[1])=="-u"&&QByteArray(argv[3])=="--sync-dlc"){
+        QStringList packages;QString data;
+        for(int i=4;i<argc;++i){if(QByteArray(argv[i])=="--datadir"){data=QString::fromLocal8Bit(argv[i+1]);break;}packages<<QString::fromLocal8Bit(argv[i]);}
+        QFile manifest(QDir(data).filePath("dlc.manifest"));if(!manifest.open(QIODevice::WriteOnly|QIODevice::Truncate))return 3;
+        int failed=0;
+        for(const auto& package:packages){
+            if(package.contains("refused")){printf("DLC error: refused.nsp: the ticket is bound to one console\n");failed=1;continue;}
+            manifest.write(("0100152000023001 65536 data "+package+"\n").toUtf8());printf("DLC: installed 0100152000023001 v65536\n");
+        }
+        fflush(stdout);return failed;
+    }
     QCoreApplication app(argc,argv);LauncherTests tests;return QTest::qExec(&tests,argc,argv);
 }
 #include "tests.moc"
