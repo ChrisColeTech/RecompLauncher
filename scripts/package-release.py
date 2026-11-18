@@ -39,11 +39,12 @@ ENGINE_FILES = ('switchrecomp.py', 'nxloader.py', 'codegen.py', 'a64.py', 'nup.p
                 'tools/nxshader/s2r_paths.py',
                 # the translator runs as 'dotnet dmsh_xlate.dll'; its extensionless macOS apphost is not shipped
                 'tools/nxshader/xlate_bin/*.dll', 'tools/nxshader/xlate_bin/*.json', 'tools/nxshader/xlate_bin/LICENSE-*.txt')
-# engine notices that move to legal/ (the runtime links libvpx and dav1d statically, so their BSD notices ship with it)
+# engine notices that move to legal/ (the runtime links libvpx, dav1d and libopus statically, so their BSD notices ship with it)
 ENGINE_LEGAL = {'LICENSE.txt': 'LICENSE.txt', 'NOTICE.txt': 'NOTICE.txt', 'docs/THIRD_PARTY.md': 'THIRD_PARTY.md',
                 'runtime/vp9/LICENSE-libvpx.txt': 'licenses/libvpx/LICENSE-libvpx.txt',
                 'runtime/vp9/PATENTS-libvpx.txt': 'licenses/libvpx/PATENTS-libvpx.txt',
-                'runtime/av1/LICENSE-dav1d.txt': 'licenses/dav1d/LICENSE-dav1d.txt'}
+                'runtime/av1/LICENSE-dav1d.txt': 'licenses/dav1d/LICENSE-dav1d.txt',
+                'runtime/opus/LICENSE': 'licenses/opus/LICENSE-opus.txt'}
 DAV1D_SOURCE = 'dav1d-1.5.5.tar.xz'
 JUNK = {'__pycache__', '_downloads', '.git', '.venv', 'venv', '.pytest_cache', 'shader_cache',
         'captures', 'logs', 'games', 'saves', 'savedata', 'firmware'}
@@ -148,8 +149,9 @@ def validate_contents(stage, platform):
         if digest(stage / LEGAL / 'sources' / name) != record['sha256']: raise RuntimeError('AV1 source checksum: ' + name)
     data = (stage / RELEASE_ENGINE / 'bin' / runtime_name(platform)).read_bytes()
     # these strings live in the linked decoder, telemetry and controller implementations, not build scripts
-    # (AV1: the video service's own line, only compiled with dav1d, and one of dav1d's messages)
-    markers = [b'WebM Project VP9 Decoder', b'dav1d %s decoding AV1', b'Error parsing OBU data', b'frame telemetry:']
+    # (AV1: the video service's own line, only compiled with dav1d, and one of dav1d's messages; Opus: the hwopus
+    # service's line, only compiled with libopus: without it every Opus packet decodes to silence)
+    markers = [b'WebM Project VP9 Decoder', b'dav1d %s decoding AV1', b'Error parsing OBU data', b'audio: opus decoder %uHz', b'frame telemetry:']
     if platform == 'windows': markers += [b'hid.dll', b'setupapi.dll']
     for marker in markers:
         if marker not in data: raise RuntimeError('Native runtime feature missing: ' + marker.decode())

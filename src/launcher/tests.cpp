@@ -160,6 +160,9 @@ private slots:
         QVERIFY(QFile::remove(path)); QVERIFY2(writeGameSettings(game,"xbox",&error),qPrintable(error));
         QVERIFY(read().contains("renderer=vulkan")); QVERIFY(read().contains("button_layout=switch"));
         game.buttonLayout.clear(); QVERIFY(writeGameSettings(game,"xbox",&error)); QVERIFY(read().contains("button_layout=xbox")); QVERIFY(!read().contains("button_layout=switch"));
+        // what the game itself wrote into its INI (F11: fullscreen=0) is not Play's to reset
+        {QFile f(path); QVERIFY(f.open(QIODevice::Append)); f.write("\r\n[Display]\r\nfullscreen=0\r\n");}
+        QVERIFY(writeGameSettings(game,"xbox",&error)); QVERIFY(read().contains("fullscreen=0")); QVERIFY(!read().contains("fullscreen=1"));
         QVERIFY(validButtonLayout("") && validButtonLayout("xbox") && !validButtonLayout("label") && !validButtonLayout("nintendo"));
         // the engine's old/alias names are read but never written
         QCOMPARE(normalizeButtonLayout("nintendo"),QString("switch")); QCOMPARE(normalizeButtonLayout("labels"),QString("xbox"));
