@@ -1,6 +1,6 @@
 # Add-On Content (DLC): Install And Run In Place
 
-Status 2026-11-18: **built and shipped** (launcher 0.5.0, engine `turbo` 2cdeabd). **Game → Install DLC…**
+Status 2026-11-18: **built and shipped** (launcher 0.5.0, engine `turbo` 8db1151). **Game → Install DLC…**
 installs NSP, NSZ, XCI, XCZ and NCA packages; Mario Kart 8 Deluxe's Booster Course Pass (BCP) plays: with the DLC
 installed Golden Dash Cup starts and Paris Promenade races, without it the same cup shows the purchase notice.
 What was built, what differs from the plan and the verification are in [section 7](#7-what-was-built-2026-11-18);
@@ -401,7 +401,13 @@ equals the engine's `bin/runtime_win64_win32.exe`), the save was backed up befor
 - The combined 1G+1U+1D package installs the same title through the CLI (`--install-dlc`), 4.6 KB image, and the
   same file again is reported as already installed.
 - Launcher UI (own instance, real library): `launcher/game-menu.png` (Game menu with Install DLC…),
-  `launcher/properties-dlc.png` (Properties → DLC listing the Booster Course package).
+  `launcher/dlc-window.png` (the DLC window listing the Booster Course package), `launcher/properties-dlc.png`
+  (Properties → DLC).
+- Remove and several packages, through the launcher on the real library (`--remove-dlc`, `--install-dlc` twice):
+  removing the Booster Course package deleted the manifest and `dlc/` and emptied `Game.dlc`; removing it again
+  failed (exit 1); installing the standalone package and the combined 1G+1U+1D package together installed the title
+  from the first and refused the second ("already installed from ..."), leaving one entry in the list. The
+  packages' hashes are unchanged.
 - Regression: Mario Kart World rebuilt through the CLI with the same runtime and run to its menus; it makes no
   `aoc:u` or data storage call.
 - Tests: launcher `launcher-tests` and `launcher-ui-tests` (the DLC list in `library.json`, the manifest reader,
