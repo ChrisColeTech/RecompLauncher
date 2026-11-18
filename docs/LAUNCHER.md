@@ -63,6 +63,15 @@ Also:
 
 Design, formats and what was verified: [DLC_IN_PLACE.md](DLC_IN_PLACE.md).
 
+### Updates
+
+**Game → Install Updates…** opens the game's **Updates window**, the DLC window's twin: **Add update…** (several
+files at once, or a drop) for `*.nsp *.xci *.nca`, **Remove** for the selected rows, **Version to build** (the newest
+installed update, a particular one, or the game without updates) and **Build now**. An update replaces the game's
+code, so every change there needs the game built again: the card's button becomes **Rebuild** with the status
+**Update changed** and **Play** waits for the build. The update's data is read in place from its package.
+**Properties → Updates** shows the same list. Everything else: [UPDATES_IN_PLACE.md](UPDATES_IN_PLACE.md).
+
 To add a game you already compiled, choose **File → Import build…** and select its EXE. The corresponding
 `_code.dll` and `_data` folder must be next to it. On Linux select the extensionless executable with its
 matching `_code.so`. NUP sources are recovered from `_data/romfs.nup` when present.
@@ -109,7 +118,7 @@ with **NSP builds need prod.keys. Use Keys > Install keys first.**
 - **Settings** is at the bottom right of the status bar and remains available through the File menu.
 - Dockable build output, opened by **View → View console** or **Ctrl+L**.
 
-There is no dashboard or permanent inspector. **Properties** holds General, Build, Runtime, Artwork, and DLC tabs.
+There is no dashboard or permanent inspector. **Properties** holds General, Build, Runtime, Artwork, DLC, and Updates tabs.
 Global tool paths, default build storage, worker count, and backdrop visibility are in **File → Settings**.
 
 **Settings → Appearance** offers Dark/Light and Lime, Mint, Violet, Rose, or Cyan accents. Changes preview

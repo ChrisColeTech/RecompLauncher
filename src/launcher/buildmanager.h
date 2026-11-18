@@ -18,6 +18,8 @@ public:
     // The engine said the package just built also holds add-on content (a 1G+1U+1D NSP).
     bool sourceHoldsDlc() const { return holdsDlc; }
     static bool reportsPackageDlc(const QString& line) { return line.startsWith("DLC: this package also holds add-on content"); }
+    // Game::updateToken() of the game as it was handed to start(): what a finished build has applied.
+    QString appliedUpdate() const { return game.updateToken(); }
 signals:
     void output(const QString& text);
     void progress(const QString& phase, int current, int total);
@@ -31,6 +33,30 @@ private:
     QByteArray pending;
     Game game;
     bool active = false, cancelled = false, holdsDlc = false;
+};
+
+// Game updates: asks the engine what update packages are (--update-info) and whether they belong to the game: the
+// engine opens each one over the game's own package with the user's keys. Nothing is written anywhere.
+class UpdateProbe : public QObject {
+    Q_OBJECT
+public:
+    explicit UpdateProbe(QObject* parent = nullptr);
+    bool start(const Game& game, const Toolchain& tools, const QStringList& packages, QString* error);
+    bool busy() const { return active; }
+    QString gameId() const { return game.id; }
+signals:
+    void output(const QString& text);
+    // found: the packages the engine accepted; errors: its reasons for the others, one per package
+    void finished(const QString& id, const QVector<GameUpdate>& found, const QStringList& errors);
+private:
+    void readOutput();
+    void complete();
+    QProcess process;
+    QByteArray pending;
+    QVector<GameUpdate> found;
+    QStringList errors;
+    Game game;
+    bool active = false;
 };
 
 // Add-on content: runs the engine's --sync-dlc for one built game, after which its data folder holds exactly the

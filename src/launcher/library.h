@@ -19,12 +19,29 @@ inline constexpr auto nativeTarget = "linux";
 inline constexpr auto nativeBackend = "x11";
 #endif
 
+// A game update the user installed for a game (Game > Install Updates…): a package of its own, read in place.
+struct GameUpdate {
+    QString path;       // the package (absolute)
+    QString titleId;    // the game it updates, 16 hex digits
+    qint64 version = 0; // content metadata version (262144); 0 when the package has none (a bare NCA)
+    QString display;    // "1.1.1", from the update's control data; may be empty
+    QString label() const; // "1.1.1 (v262144)"
+};
+
 struct Game {
     QString id, title, source, buildDir, outputName, cover, background;
     QString renderer = "vulkan";
     QString buttonLayout; // Empty inherits the launcher default (Settings > Controller).
     QString builtSource;
     QStringList dlc; // Add-on content packages (absolute paths) installed with Game > Install DLC….
+    // Updates. An update replaces the game's code, so it is applied by building the game again; its data is then read
+    // in place from the game's package and the update's. One update applies at a time.
+    QVector<GameUpdate> updates;
+    QString updateChoice; // "" = the newest installed update, "none" = the game without updates, else a package path
+    QString builtUpdate;  // updateToken() of the last build
+    const GameUpdate* activeUpdate() const; // the update the next build applies, or nullptr
+    QString updateToken() const;            // what the next build applies: "" (the source as it is), "none" or the update's path
+    bool updatePending() const;             // built, but with another update than the one chosen now: build again
     bool buildIncomplete = false;
     int workers = 0; // Zero inherits the launcher default.
     int optimization = 2;
@@ -100,6 +117,19 @@ bool adoptPackageDlc(Game& game, const QString& builtBefore);
 // Add-on content (DLC). The engine installs a package into the built game's data folder (switchrecomp.py
 // --install-dlc / --sync-dlc: <data>/dlc.manifest plus <data>/dlc/<title id>/); the launcher keeps the list of
 // packages in Game::dlc and has the engine bring the data folder in line after a build and before Play.
+inline constexpr auto updateFileFilter = "Game updates (*.nsp *.xci *.nca);;All files (*)";
+// A quick look at the file itself before the engine is asked: a type an update can be read from in place.
+bool validUpdatePackage(const QString& path, QString* error);
+// The engine arguments that say what the update packages are and check them against the game's source.
+QStringList updateInfoArguments(const Game& game, const QString& toolRoot, const QStringList& packages);
+// One line of the engine's answer: "UPDATE\t<path>\t<title id>\t<version>\t<display>" fills update and returns
+// true; "UPDATE error: <reason>" fills error and returns false; any other line returns false with error empty.
+bool parseUpdateInfo(const QString& line, GameUpdate* update, QString* error);
+// "Update [v262144].nsp — 1.1.1 (v262144) — applied" for the lists.
+QString updateDescription(const Game& game, const GameUpdate& update);
+// "1.1.1 (v262144)", "the game without updates", for status lines.
+QString updateTokenLabel(const Game& game, const QString& token);
+
 inline constexpr auto dlcFileFilter = "Add-on content (*.nsp *.nsz *.xci *.xcz *.nca);;All files (*)";
 struct DlcTitle {
     QString titleId; // 16 hex digits

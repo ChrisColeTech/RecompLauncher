@@ -52,6 +52,18 @@ It needs `prod.keys` (**Keys → Install keys…**). The DLC is in effect the ne
 work, such as one whose ticket is tied to another console, is refused with the reason
 ([details](docs/DLC_IN_PLACE.md)).
 
+### Updates
+
+Select the game, then **Game → Install Updates…** to open its Updates window:
+
+- **Add update…** (or drop files on the window) adds one or several update packages: `.nsp`, `.xci`, or an `.nca`
+  with its ticket. The game itself has to be an `.nsp` package.
+- **Version to build** chooses which one applies: the newest (the default), a particular one, or the game without
+  updates. **Remove** takes the selected entries off the list.
+- An update replaces the game's code, so the game has to be **built again** to apply a change: the card shows
+  **Rebuild** until then, and **Build now** in the window starts it. The update's data is read from its file while
+  you play: keep the file where it is ([details](docs/UPDATES_IN_PLACE.md)).
+
 ## Good to know
 
 - **Keep your game files where they are.** Builds read the game's data straight from the original package, so

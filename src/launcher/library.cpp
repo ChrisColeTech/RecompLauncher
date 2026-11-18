@@ -94,10 +94,33 @@ bool adoptPackageDlc(Game& game, const QString& builtBefore) {
     game.dlc << absolute(game.source);
     return true;
 }
-bool Game::hasBuild() const {
-    return !buildIncomplete && !buildDir.isEmpty() && !outputName.isEmpty() && QFileInfo(executable()).isFile()
-        && QFileInfo(codeModule()).isFile() && QDir(dataDir()).exists()
-        && (source.isEmpty() || samePath(builtSource, source));
+static bool sameToken(const QString& left, const QString& right) {
+    return left == right || (left != "none" && right != "none" && !left.isEmpty() && !right.isEmpty() && samePath(left, right));
+}
+static bool builtFiles(const Game& g) {
+    return !g.buildIncomplete && !g.buildDir.isEmpty() && !g.outputName.isEmpty() && QFileInfo(g.executable()).isFile()
+        && QFileInfo(g.codeModule()).isFile() && QDir(g.dataDir()).exists()
+        && (g.source.isEmpty() || samePath(g.builtSource, g.source));
+}
+bool Game::hasBuild() const { return builtFiles(*this) && sameToken(builtUpdate, updateToken()); }
+bool Game::updatePending() const { return builtFiles(*this) && !sameToken(builtUpdate, updateToken()); }
+QString GameUpdate::label() const {
+    if (display.isEmpty()) return version ? QString("v%1").arg(version) : QString("version unknown");
+    return version ? QString("%1 (v%2)").arg(display).arg(version) : display;
+}
+const GameUpdate* Game::activeUpdate() const {
+    if (updateChoice == "none" || updates.isEmpty()) return nullptr;
+    const GameUpdate* newest = nullptr;
+    for (const auto& update : updates) {
+        if (!updateChoice.isEmpty() && samePath(update.path, updateChoice)) return &update;
+        if (!newest || update.version > newest->version) newest = &update;
+    }
+    return newest;   // the choice is gone from the list: back to the newest
+}
+QString Game::updateToken() const {
+    if (updateChoice == "none") return "none";
+    const auto* update = activeUpdate();
+    return update ? update->path : QString{};
 }
 bool Game::sourceAvailable() const { return !source.isEmpty() && QFileInfo::exists(source); }
 QJsonObject Game::json() const {
@@ -105,7 +128,9 @@ QJsonObject Game::json() const {
         {"outputName", outputName}, {"cover", cover}, {"background", background}, {"renderer", renderer}, {"buttonLayout", buttonLayout},
         {"workers", workers}, {"optimization", optimization},
         {"builtSource", builtSource}, {"buildIncomplete", buildIncomplete}, {"lastPlayed", lastPlayed.toString(Qt::ISODate)},
-        {"lastBuilt", lastBuilt.toString(Qt::ISODate)}, {"dlc", QJsonArray::fromStringList(dlc)}};
+        {"lastBuilt", lastBuilt.toString(Qt::ISODate)}, {"dlc", QJsonArray::fromStringList(dlc)},
+        {"updates", [this] { QJsonArray list; for (const auto& u : updates) list.append(QJsonObject{{"path", u.path}, {"titleId", u.titleId}, {"version", u.version}, {"display", u.display}}); return list; }()},
+        {"updateChoice", updateChoice}, {"builtUpdate", builtUpdate}};
 }
 Game Game::fromJson(const QJsonObject& o) {
     Game g;
@@ -121,6 +146,16 @@ Game Game::fromJson(const QJsonObject& o) {
     g.buildIncomplete = o["buildIncomplete"].toBool();
     g.lastPlayed = QDateTime::fromString(o["lastPlayed"].toString(), Qt::ISODate);
     g.lastBuilt = QDateTime::fromString(o["lastBuilt"].toString(), Qt::ISODate);
+    for (const auto& value : o["updates"].toArray()) {
+        const auto entry = value.toObject();
+        GameUpdate update;
+        update.path = entry["path"].toString(); update.titleId = entry["titleId"].toString();
+        update.version = static_cast<qint64>(entry["version"].toDouble()); update.display = entry["display"].toString();
+        bool known = update.path.isEmpty();
+        for (const auto& have : g.updates) known = known || samePath(have.path, update.path);
+        if (!known) g.updates.append(update);
+    }
+    g.updateChoice = o["updateChoice"].toString(); g.builtUpdate = o["builtUpdate"].toString();
     for (const auto& value : o["dlc"].toArray()) {
         const QString path = value.toString();
         bool known = path.isEmpty();
@@ -318,6 +353,54 @@ bool samePath(const QString& left,const QString& right){
     return normalized(left)==normalized(right);
 #endif
 }
+bool validUpdatePackage(const QString& path, QString* error) {
+    const QFileInfo info(path);
+    const QString suffix = info.suffix().toLower();
+    if (!info.isFile()) return fail(error, "The file does not exist: " + path);
+    if (suffix == "nsz" || suffix == "xcz")
+        return fail(error, info.fileName() + " is a compressed package. An update is read in place while the game runs, which a "
+                           "compressed file does not allow: decompress it to an NSP or XCI first (nsz -D).");
+    if (!QStringList{"nsp", "xci", "nca"}.contains(suffix))
+        return fail(error, info.fileName() + " is not an update package. Select an NSP, XCI or NCA file.");
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly)) return fail(error, file.errorString());
+    const auto head = file.read(0x1104);
+    if (suffix == "nsp" && !head.startsWith("PFS0")) return fail(error, info.fileName() + " is not a valid NSP package (no PFS0 header).");
+    if (suffix == "xci" && head.mid(0x100, 4) != "HEAD" && head.mid(0x1100, 4) != "HEAD") return fail(error, info.fileName() + " is not a valid XCI card image.");
+    if (suffix == "nca" && info.size() < 0xC00) return fail(error, info.fileName() + " is too small to be an NCA.");
+    return true;
+}
+QStringList updateInfoArguments(const Game& game, const QString& toolRoot, const QStringList& packages) {
+    QStringList arguments{"-u", recompCli(toolRoot), QDir::toNativeSeparators(game.source), "--update-info"};
+    for (const auto& package : packages) arguments << QDir::toNativeSeparators(package);
+    return arguments;
+}
+bool parseUpdateInfo(const QString& line, GameUpdate* update, QString* error) {
+    error->clear();
+    if (line.startsWith("UPDATE error: ")) { *error = line.mid(14).trimmed(); return false; }
+    const auto parts = line.split('\t');   // the display version, the last field, can be empty
+    if (parts.size() < 4 || parts[0] != "UPDATE") return false;
+    update->path = QDir::fromNativeSeparators(parts[1].trimmed()); update->titleId = parts[2].trimmed();
+    update->version = parts[3].trimmed().toLongLong(); update->display = parts.value(4).trimmed();
+    return !update->path.isEmpty();
+}
+QString updateTokenLabel(const Game& game, const QString& token) {
+    if (token == "none") return "the game without updates";
+    for (const auto& update : game.updates) if (samePath(update.path, token)) return "update " + update.label();
+    return token.isEmpty() ? QString("the game as its package is") : "update " + QFileInfo(token).fileName();
+}
+QString updateDescription(const Game& game, const GameUpdate& update) {
+    QString text = QFileInfo(update.path).fileName() + " — " + update.label();
+    const auto* active = game.activeUpdate();
+    const bool chosen = active && samePath(active->path, update.path);
+    const bool built = !game.builtUpdate.isEmpty() && game.builtUpdate != "none" && samePath(game.builtUpdate, update.path)
+        && !game.buildIncomplete && QFileInfo(game.executable()).isFile();
+    if (!QFileInfo::exists(update.path)) text += " — file not found";
+    else if (chosen && built) text += " — applied";
+    else if (chosen) text += " — selected, build the game to apply it";
+    else if (built) text += " — in the current build, not selected";
+    return text;
+}
 QVector<DlcTitle> readDlcManifest(const QString& dataDir) {
     QVector<DlcTitle> titles;
     QFile file(QDir(dataDir).filePath("dlc.manifest"));
@@ -434,8 +517,16 @@ bool gameFromExecutable(const QString& path, Game* game, QString* error) {
     if (g.source.isEmpty()) {
         QFile nspMarker(QDir(g.dataDir()).filePath("romfs.nsp"));
         // SWRNSP2: an encrypted package, or one that holds the game with its update; the package path is line 2 in both
-        if (nspMarker.open(QIODevice::ReadOnly) && QByteArrayList{"SWRNSP1", "SWRNSP2"}.contains(nspMarker.readLine().trimmed()))
+        if (nspMarker.open(QIODevice::ReadOnly) && QByteArrayList{"SWRNSP1", "SWRNSP2"}.contains(nspMarker.readLine().trimmed())) {
             g.source = QString::fromUtf8(nspMarker.readLine()).trimmed();
+            // a build with an update of its own package (docs/UPDATES_IN_PLACE.md): the update joins the game's list
+            while (!nspMarker.atEnd()) {
+                const QString row = QString::fromUtf8(nspMarker.readLine()).trimmed();
+                if (!row.startsWith("update ")) continue;
+                GameUpdate update; update.path = QDir::fromNativeSeparators(row.mid(7).trimmed()); update.display = g.version();
+                g.updates = {update}; g.builtUpdate = update.path;
+            }
+        }
     }
     g.builtSource = g.source; g.renderer = readRenderer(g.iniPath());
     for (const auto& name : {"icon.jpg", "icon.png", "icon_AmericanEnglish.dat"}) {
@@ -552,6 +643,8 @@ CardState cardState(const Game& game, bool running, bool building, bool otherBui
             return {"Play","Source offline",false,true,false,false};
         return {"Play","Ready to play",true,false,false,false};
     }
+    if(game.updatePending())   // the update changed since the build: the code has to be recompiled
+        return {"Rebuild","Update changed",!otherBuild&&toolsReady&&game.sourceAvailable(),true,false,false};
     return {"Build",game.buildIncomplete?"Build incomplete":"Needs build",
         !otherBuild&&toolsReady&&game.sourceAvailable(),true,false,false};
 }

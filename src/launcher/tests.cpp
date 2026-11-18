@@ -303,6 +303,76 @@ private slots:
         Game unbuilt; unbuilt.buildDir=tmp.filePath("nowhere"); unbuilt.outputName="X"; unbuilt.dlc={good};
         QVERIFY(!installer.start(unbuilt,tools,&error)); QVERIFY(error.contains("Build the game first"));
     }
+    void updatesInTheLibraryAndTheBuild() {
+        QTemporaryDir tmp; Game game=builtGame(tmp); game.source=tmp.filePath("Game [v0].nsp"); game.builtSource=game.source;
+        writeFile(game.source,"PFS0"); QVERIFY(game.hasBuild()); QVERIFY(!game.updatePending());
+        QVERIFY(game.updateToken().isEmpty()); QVERIFY(!game.activeUpdate());
+        const QString older=tmp.filePath("Update [v65536].nsp"),newer=tmp.filePath("Update [v262144].nsp");
+        writeFile(older,"PFS0"); writeFile(newer,"PFS0");
+        // an update added: the newest applies, and the build that was made without it is behind
+        game.updates={{newer,"0100aaaa0000c000",262144,"1.1.1"},{older,"0100aaaa0000c000",65536,"1.0.1"}};
+        QCOMPARE(game.activeUpdate()->path,newer); QCOMPARE(game.updateToken(),newer);
+        QVERIFY(!game.hasBuild()); QVERIFY(game.updatePending());
+        auto state=cardState(game,false,false,false,true); QCOMPARE(state.action,QString("Rebuild")); QCOMPARE(state.status,QString("Update changed")); QVERIFY(state.actionEnabled);
+        Toolchain t; t.root="D:/Engine"; t.compiler="gcc"; t.runtime="runtime";
+        auto args=BuildManager::arguments(game,t,4); QCOMPARE(args[args.indexOf("--update")+1],QDir::toNativeSeparators(newer)); QVERIFY(!args.contains("--no-update"));
+        game.builtUpdate=QDir::toNativeSeparators(newer); QVERIFY(game.hasBuild()); QVERIFY(!game.updatePending());   // built with it
+        QCOMPARE(cardState(game,false,false,false,true).action,QString("Play"));
+        QCOMPARE(updateDescription(game,game.updates[0]),QString("Update [v262144].nsp — 1.1.1 (v262144) — applied"));
+        // a particular one, or none
+        game.updateChoice=older; QCOMPARE(game.updateToken(),older); QVERIFY(game.updatePending());
+        QCOMPARE(updateDescription(game,game.updates[1]),QString("Update [v65536].nsp — 1.0.1 (v65536) — selected, build the game to apply it"));
+        game.updateChoice="none"; QVERIFY(!game.activeUpdate()); QCOMPARE(game.updateToken(),QString("none"));
+        args=BuildManager::arguments(game,t,4); QVERIFY(args.contains("--no-update")); QVERIFY(!args.contains("--update"));
+        QCOMPARE(updateTokenLabel(game,"none"),QString("the game without updates")); QCOMPARE(updateTokenLabel(game,newer),QString("update 1.1.1 (v262144)"));
+        // removed: back to the game as its package is, and the build is behind again
+        game.updateChoice=newer; game.updates.clear(); QVERIFY(game.updateToken().isEmpty()); QVERIFY(game.updatePending());
+        QVERIFY(!BuildManager::arguments(game,t,4).contains("--update"));
+        game.builtUpdate.clear(); QVERIFY(game.hasBuild());
+        // library.json
+        game.updates={{newer,"0100aaaa0000c000",262144,"1.1.1"},{older,"0100aaaa0000c000",65536,""}}; game.updateChoice=older; game.builtUpdate=newer;
+        const Game loaded=Game::fromJson(game.json());
+        QCOMPARE(loaded.updates.size(),2); QCOMPARE(loaded.updates[0].path,newer); QCOMPARE(loaded.updates[0].version,qint64(262144));
+        QCOMPARE(loaded.updates[0].display,QString("1.1.1")); QCOMPARE(loaded.updates[1].label(),QString("v65536"));
+        QCOMPARE(loaded.updateChoice,older); QCOMPARE(loaded.builtUpdate,newer);
+        const Game old=Game::fromJson({{"id","x"},{"title","Old"}}); QVERIFY(old.updates.isEmpty()); QVERIFY(old.updateChoice.isEmpty()); QVERIFY(old.builtUpdate.isEmpty());
+        // the engine's answer and the files
+        GameUpdate update; QString error;
+        QVERIFY(parseUpdateInfo("UPDATE\tD:\\Games\\Update [v262144].nsp\t01001f5010dfa000\t262144\t1.1.1",&update,&error));
+        QCOMPARE(update.path,QString("D:/Games/Update [v262144].nsp")); QCOMPARE(update.titleId,QString("01001f5010dfa000")); QCOMPARE(update.version,qint64(262144)); QCOMPARE(update.display,QString("1.1.1"));
+        QVERIFY(parseUpdateInfo("UPDATE\tD:\\bare.nca\t01001f5010dfa000\t0\t",&update,&error)); QVERIFY(update.display.isEmpty());
+        QVERIFY(!parseUpdateInfo("UPDATE error: X.nsp: this update is for 0100152000022000, not for this game",&update,&error)); QVERIFY(error.startsWith("X.nsp: this update"));
+        QVERIFY(!parseUpdateInfo("anything else",&update,&error)); QVERIFY(error.isEmpty());
+        QCOMPARE(updateInfoArguments(game,"D:/Engine",{newer}).mid(2),QStringList({QDir::toNativeSeparators(game.source),"--update-info",QDir::toNativeSeparators(newer)}));
+        writeFile(tmp.filePath("u.nsz"),"PFS0"); writeFile(tmp.filePath("u.txt"),"PFS0"); writeFile(tmp.filePath("bad.nsp"),"nope");
+        QVERIFY(validUpdatePackage(newer,&error)); QVERIFY(!validUpdatePackage(tmp.filePath("u.nsz"),&error)); QVERIFY(error.contains("compressed"));
+        QVERIFY(!validUpdatePackage(tmp.filePath("u.txt"),&error)); QVERIFY(!validUpdatePackage(tmp.filePath("bad.nsp"),&error)); QVERIFY(!validUpdatePackage(tmp.filePath("gone.nsp"),&error));
+    }
+    void importedBuildBringsItsUpdate() {
+        QTemporaryDir tmp; Game built=builtGame(tmp);
+        const QString source=tmp.filePath("Game [v0].nsp"),update=tmp.filePath("Game [UPD].nsp");
+        writeFile(built.dataDir()+"/romfs.nsp",("SWRNSP2\n"+QDir::toNativeSeparators(source)+"\nkeys k\nromfs 0 10\nbase 0 10 0 3 0000000000000000 titlekek_00:00\nupdate "
+            +QDir::toNativeSeparators(update)+"\npatch 0 10 0 4 0000000000000000 titlekek_00:00 0 0 0 0\n").toUtf8());
+        Game game; QString error; QVERIFY2(gameFromExecutable(built.executable(),&game,&error),qPrintable(error));
+        QVERIFY(samePath(game.source,source)); QCOMPARE(game.updates.size(),1); QVERIFY(samePath(game.updates[0].path,update));
+        QVERIFY(samePath(game.builtUpdate,update)); QVERIFY(game.hasBuild()); QVERIFY(!game.updatePending());
+    }
+    void updateProbeAsksTheEngine() {
+        // this test binary stands in for Python + the engine: see main() below
+        QTemporaryDir tmp; Game game=builtGame(tmp); game.source=tmp.filePath("Game.nsp"); writeFile(game.source,"PFS0");
+        Toolchain tools; tools.root=tmp.path(); tools.python=QCoreApplication::applicationFilePath(); tools.keys=tmp.filePath("prod.keys");
+        UpdateProbe probe; QString error;
+        QVERIFY(!probe.start(game,tools,{tmp.filePath("Update.nsp")},&error)); QVERIFY(error.contains("prod.keys"));
+        writeFile(tools.keys,"header_key = 00");
+        QSignalSpy finished(&probe,&UpdateProbe::finished);
+        QVERIFY2(probe.start(game,tools,{tmp.filePath("Update.nsp"),tmp.filePath("other game.nsp")},&error),qPrintable(error));
+        QVERIFY(!probe.start(game,tools,{},&error));
+        QVERIFY(finished.wait(15000)); QVERIFY(!probe.busy());
+        const auto found=finished[0][1].value<QVector<GameUpdate>>(); QCOMPARE(found.size(),1);
+        QVERIFY(samePath(found[0].path,tmp.filePath("Update.nsp"))); QCOMPARE(found[0].version,qint64(262144)); QCOMPARE(found[0].display,QString("1.1.1"));
+        QCOMPARE(finished[0][2].toStringList(),QStringList("other game.nsp: this update is for another game"));
+        QFile::remove(game.source); QVERIFY(!probe.start(game,tools,{tmp.filePath("Update.nsp")},&error)); QVERIFY(error.contains("own package is missing"));
+    }
     void importChecksAllArtifacts() {
         QTemporaryDir tmp; const QString exe=tmp.filePath(QString("My Game")+executableSuffix); QString error; Game g;
         {QFile f(exe); QVERIFY(f.open(QIODevice::WriteOnly)); f.write("test");}
@@ -371,6 +441,16 @@ private slots:
 int main(int argc,char** argv) {
     // copied into fixture tool directories to exercise executable probes without another Python installation
     if(argc>1&&QByteArray(argv[1])=="-c")return 0;
+    // ...and the engine's --update-info (updateProbeAsksTheEngine): every package but "other game" is an update 1.1.1
+    if(argc>4&&QByteArray(argv[1])=="-u"&&QByteArray(argv[4])=="--update-info"){
+        int failed=0;
+        for(int i=5;i<argc;++i){
+            const QString package=QString::fromLocal8Bit(argv[i]);
+            if(package.contains("other game")){printf("UPDATE error: other game.nsp: this update is for another game\n");failed=1;}
+            else printf("UPDATE\t%s\t0100aaaa0000c000\t262144\t1.1.1\n",argv[i]);
+        }
+        fflush(stdout);return failed;
+    }
     // ...and the engine's --sync-dlc (dlcInstallerRunsTheEngineSync): every package but "refused" gets a manifest line
     if(argc>3&&QByteArray(argv[1])=="-u"&&QByteArray(argv[3])=="--sync-dlc"){
         QStringList packages;QString data;

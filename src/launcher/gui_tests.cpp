@@ -1,6 +1,7 @@
 // RecompLauncher - native game library and build launcher.
 // The vendored Switch2RECOMP engine keeps its AGPL-3.0 notices under third_party/Switch2RECOMP.
 #include "dlcpanel.h"
+#include "updatepanel.h"
 #include "filterpopup.h"
 #include "window.h"
 #include "theme.h"
@@ -9,6 +10,7 @@
 #include <QMenuBar>
 #include <QApplication>
 #include <QComboBox>
+#include <QSignalSpy>
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
@@ -70,7 +72,7 @@ private slots:
         auto* bar=window.findChild<TitleBar*>();QVERIFY(bar);
         QMenu* game=nullptr;for(auto* action:bar->menuBar()->actions())if(action->text()=="&Game")game=action->menu();
         QVERIFY(game);QStringList names;for(auto* action:game->actions())names<<(action->isSeparator()?"-":action->text());
-        QCOMPARE(names,QStringList({"Play","Stop","Build","-","Install DLC…","-","Remove from library…"}));
+        QCOMPARE(names,QStringList({"Play","Stop","Build","-","Install DLC…","Install Updates…","-","Remove from library…"}));
         auto* install=window.findChild<QAction*>("InstallDlc");QVERIFY(install);QVERIFY(game->actions().contains(install));
         QVERIFY(!install->isEnabled());                       // the preview library has nothing to install into
         window.show();QVERIFY(QTest::qWaitForWindowExposed(&window));
@@ -140,6 +142,59 @@ private slots:
         QVERIFY(!locked.addButton->isEnabled());QVERIFY(!locked.removeButton->isEnabled());
         QSignalSpy lockedRemoved(&locked,&DlcDialog::removeRequested);locked.removeSelected();locked.addFiles({more});QCOMPARE(lockedRemoved.count(),0);
         QVERIFY(locked.hint->text().contains("cannot be changed"));
+    }
+    void updatesWindowAddsRemovesAndChooses(){
+        QTemporaryDir tmp;Game game;game.id="g";game.title="Arceus";game.outputName="Arceus";game.buildDir=tmp.filePath("build");
+        game.source=tmp.filePath("Game [v0].nsp");game.builtSource=game.source;
+        QDir().mkpath(game.dataDir());
+        for(const auto& path:{game.executable(),game.codeModule(),game.source}){QFile f(path);QVERIFY(f.open(QIODevice::WriteOnly));f.write("PFS0");}
+        const QString older=tmp.filePath("Update [v65536].nsp"),newer=tmp.filePath("Update [v262144].nsp"),more=tmp.filePath("More.xci");
+        for(const auto& path:{older,newer}){QFile f(path);QVERIFY(f.open(QIODevice::WriteOnly));f.write("PFS0");}
+        game.updates={{older,"01001f5010dfa000",65536,"1.0.1"},{newer,"01001f5010dfa000",262144,"1.1.1"}};
+        game.builtUpdate=newer;QVERIFY(game.hasBuild());
+        UpdateDialog dialog(game,false);
+        QCOMPARE(dialog.windowTitle(),QString("Updates — Arceus"));
+        QCOMPARE(dialog.list->count(),2);
+        QCOMPARE(dialog.list->item(0)->text(),QString("Update [v65536].nsp — 1.0.1 (v65536)"));
+        QCOMPARE(dialog.list->item(1)->text(),QString("Update [v262144].nsp — 1.1.1 (v262144) — applied"));
+        // the version to build: newest by default, each installed update, or none
+        QCOMPARE(dialog.choice->count(),4);QCOMPARE(dialog.choice->currentIndex(),0);
+        QCOMPARE(dialog.choice->itemText(0),QString("Newest installed update — 1.1.1 (v262144)"));
+        QCOMPARE(dialog.choice->itemData(1).toString(),older);QCOMPARE(dialog.choice->itemData(3).toString(),QString("none"));
+        QVERIFY(dialog.pending->isHidden());QVERIFY(!dialog.buildButton->isEnabled());            // the build is what is chosen
+        QSignalSpy removed(&dialog,&UpdateDialog::removeRequested),added(&dialog,&UpdateDialog::addRequested),
+            chosen(&dialog,&UpdateDialog::choiceRequested),build(&dialog,&UpdateDialog::buildRequested);
+        QVERIFY(!dialog.removeButton->isEnabled());
+        dialog.list->item(0)->setSelected(true);dialog.list->item(1)->setSelected(true);QVERIFY(dialog.removeButton->isEnabled());
+        QTest::mouseClick(dialog.removeButton,Qt::LeftButton);
+        QCOMPARE(removed.count(),1);QCOMPARE(removed[0][0].toStringList(),QStringList({older,newer}));
+        dialog.addFiles({more,older});QCOMPARE(added.count(),1);QCOMPARE(added[0][0].toStringList(),QStringList({more,older}));
+        dialog.choice->setCurrentIndex(1);emit dialog.choice->activated(1);
+        QCOMPARE(chosen.count(),1);QCOMPARE(chosen[0][0].toString(),older);
+        // the main window answers: the older update is chosen now, so the build is behind and can be started here
+        game.updateChoice=older;QVERIFY(game.updatePending());dialog.setGame(game);
+        QCOMPARE(dialog.choice->currentIndex(),1);
+        QCOMPARE(dialog.list->item(0)->text(),QString("Update [v65536].nsp — 1.0.1 (v65536) — selected, build the game to apply it"));
+        QCOMPARE(dialog.list->item(1)->text(),QString("Update [v262144].nsp — 1.1.1 (v262144) — in the current build, not selected"));
+        QVERIFY(!dialog.pending->isHidden());QVERIFY(dialog.pending->text().contains("update 1.1.1 (v262144)"));QVERIFY(dialog.pending->text().contains("update 1.0.1 (v65536)"));
+        QVERIFY(dialog.buildButton->isEnabled());QTest::mouseClick(dialog.buildButton,Qt::LeftButton);QCOMPARE(build.count(),1);
+        // busy and its outcome
+        dialog.setBusy(true,"Checking the update against the game…");QVERIFY(!dialog.addButton->isEnabled());QVERIFY(!dialog.choice->isEnabled());QVERIFY(!dialog.buildButton->isEnabled());
+        dialog.addFiles({more});QCOMPARE(added.count(),1);
+        dialog.setBusy(false);dialog.setStatus("More.xci: this update is for 0100152000022000, not for this game",true);
+        QVERIFY(dialog.status->property("error").toBool());QVERIFY(dialog.addButton->isEnabled());
+        // none left: the game without updates
+        game.updates.clear();game.updateChoice.clear();dialog.setGame(game);
+        QCOMPARE(dialog.list->count(),0);QCOMPARE(dialog.choice->count(),2);QVERIFY(dialog.hint->text().contains("Add update…"));
+        QVERIFY(dialog.pending->text().contains("the game as its package is"));
+        // a running or building game: read-only
+        game.updates={{newer,"01001f5010dfa000",262144,"1.1.1"}};UpdateDialog locked(game,true);locked.list->item(0)->setSelected(true);
+        QVERIFY(!locked.addButton->isEnabled());QVERIFY(!locked.removeButton->isEnabled());QVERIFY(!locked.choice->isEnabled());
+        QSignalSpy lockedRemoved(&locked,&UpdateDialog::removeRequested);locked.removeSelected();QCOMPARE(lockedRemoved.count(),0);
+        // Properties > Updates: the same list, removal applied by the caller
+        UpdatePanel panel(game,false);QCOMPARE(panel.list->count(),1);QVERIFY(panel.list->item(0)->text().endsWith("— applied"));
+        panel.removeRow(0);QVERIFY(panel.updates().isEmpty());QVERIFY(panel.note->text().contains("Game > Install Updates"));
+        UpdatePanel fixed(game,true);fixed.removeRow(0);QCOMPARE(fixed.updates().size(),1);
     }
     void escapeClosesPopup(){
         QWidget owner;QPushButton anchor("Find games",&owner);owner.resize(400,300);anchor.resize(100,70);owner.show();

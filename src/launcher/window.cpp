@@ -3,6 +3,7 @@
 #include "window.h"
 #include "artwork.h"
 #include "dlcpanel.h"
+#include "updatepanel.h"
 #include "filterpopup.h"
 #include "theme.h"
 #include "titlebar.h"
@@ -128,7 +129,7 @@ QFormLayout* tabForm(QTabWidget* tabs,const QString& name) {
 }
 }
 
-Window::Window(const QString& file,const QString& root,bool isDemo):library(file),builder(this),dlcInstaller(this),demo(isDemo) {
+Window::Window(const QString& file,const QString& root,bool isDemo):library(file),builder(this),dlcInstaller(this),updateProbe(this),demo(isDemo) {
     setWindowTitle("RecompLauncher");resize(1280,800);setMinimumSize(920,600);setAcceptDrops(true);
     setDockOptions(QMainWindow::AllowTabbedDocks|QMainWindow::AnimatedDocks);
     QString error;library.load(&error);
@@ -156,7 +157,7 @@ Window::Window(const QString& file,const QString& root,bool isDemo):library(file
             if(okay){
                 // a package with the game and its DLC in one file: the first build from it lists it as the game's DLC too
                 if(builder.sourceHoldsDlc()&&adoptPackageDlc(*game,game->builtSource))console->appendPlainText("DLC: "+QFileInfo(game->source).fileName()+" is now on this game's DLC list");
-                game->builtSource=game->source;game->buildIncomplete=false;game->lastBuilt=QDateTime::currentDateTime();
+                game->builtSource=game->source;game->builtUpdate=builder.appliedUpdate();game->buildIncomplete=false;game->lastBuilt=QDateTime::currentDateTime();
             }
             save();
         }
@@ -166,6 +167,22 @@ Window::Window(const QString& file,const QString& root,bool isDemo):library(file
         if(closing)QTimer::singleShot(0,this,&QWidget::close);
         // a fresh build gets the game's DLC put (back) into its data folder
         else if(okay){const auto* built=library.find(id);if(built&&!built->dlc.isEmpty())startDlcSync(id,DlcBuilt);}
+    });
+    connect(&updateProbe,&UpdateProbe::output,console,&QPlainTextEdit::appendPlainText);
+    connect(&updateProbe,&UpdateProbe::finished,this,[this](const QString& id,const QVector<GameUpdate>& found,const QStringList& errors){
+        progress->hide();jobLabel->clear();
+        auto* game=library.find(id);if(!game){if(updateDialog)updateDialog->setBusy(false);return;}
+        QStringList added;
+        for(const auto& update:found){
+            bool known=false;for(auto& have:game->updates)if(samePath(have.path,update.path)){have=update;known=true;}
+            if(!known)game->updates.append(update);
+            added<<update.label();
+        }
+        if(!found.isEmpty()){save();refreshLibrary();}
+        if(updateDialog){updateDialog->setBusy(false);updateDialog->setGame(*game);}
+        QString text=errors.join("\n\n");
+        if(!added.isEmpty())text+=(text.isEmpty()?QString{}:"\n\n")+"Added: "+added.join(", ")+". "+updateOutcome(*game);
+        updateReport(errors.isEmpty()?"Update added":"Update could not be added",text,!errors.isEmpty());
     });
     connect(&dlcInstaller,&DlcInstaller::output,console,&QPlainTextEdit::appendPlainText);
     connect(&dlcInstaller,&DlcInstaller::finished,this,[this](const QString& id,bool,const QStringList& errors){
@@ -230,6 +247,8 @@ void Window::createActions(){
     removeAction=new QAction("Remove from library…",this);connect(removeAction,&QAction::triggered,this,&Window::removeGame);
     installDlcAction=new QAction("Install DLC…",this);installDlcAction->setObjectName("InstallDlc");
     installDlcAction->setToolTip("Install or remove add-on content for the selected game (NSP, NSZ, XCI, XCZ, NCA)");connect(installDlcAction,&QAction::triggered,this,&Window::installDlc);
+    installUpdatesAction=new QAction("Install Updates…",this);installUpdatesAction->setObjectName("InstallUpdates");
+    installUpdatesAction->setToolTip("Install or remove game updates for the selected game (NSP, XCI, NCA) and choose the version to build");connect(installUpdatesAction,&QAction::triggered,this,&Window::installUpdates);
     auto* group=new QActionGroup(this);group->setExclusive(true);
     galleryAction=make("Gallery","grid","Cover gallery");tableAction=make("List","list","Sortable details list");
     for(auto* a:{galleryAction,tableAction}){a->setCheckable(true);group->addAction(a);}
@@ -248,7 +267,7 @@ void Window::createMenusAndToolbar(){
     auto* file=menus->addMenu("&File");file->addAction(addAction);file->addAction(addFolderAction);file->addAction(importAction);
     file->addSeparator();file->addAction(settingsAction);
     file->addSeparator();file->addAction("Exit",QKeySequence("Alt+F4"),this,&QWidget::close);
-    auto* game=menus->addMenu("&Game");game->addAction(playAction);game->addAction(stopAction);game->addAction(buildAction);game->addSeparator();game->addAction(installDlcAction);game->addSeparator();game->addAction(removeAction);
+    auto* game=menus->addMenu("&Game");game->addAction(playAction);game->addAction(stopAction);game->addAction(buildAction);game->addSeparator();game->addAction(installDlcAction);game->addAction(installUpdatesAction);game->addSeparator();game->addAction(removeAction);
     auto* keys=menus->addMenu("&Keys");keys->addAction(installKeysAction);keys->addAction("Open keys folder",this,[this]{const auto path=QFileInfo(library.keysPath).absolutePath();if(QDir(path).exists())QDesktopServices::openUrl(QUrl::fromLocalFile(path));});
     auto* view=menus->addMenu("&View");view->setObjectName("ViewMenu");view->addAction(galleryAction);view->addAction(tableAction);view->addSeparator();view->addAction(filterAction);view->addAction(backgroundAction);
     view->addAction("Refresh library",QKeySequence("F5"),this,[this]{invalidateArtwork();refreshTools();refreshLibrary();});
@@ -329,6 +348,7 @@ QString Window::statusFor(const Game& g)const{
     if(builder.busy()&&builder.gameId()==g.id)return "Building";
     if(running.contains(g.id))return "Running";
     if(g.hasBuild()&&g.source.endsWith(".nup",Qt::CaseInsensitive)&&!g.sourceAvailable())return "Source offline";
+    if(g.updatePending())return "Update changed — build again";
     return g.hasBuild()?"Ready to play":"Build needed";
 }
 void Window::save(){if(demo)return;QString error;if(!library.save(&error))message("Could not save library",error,true);}
@@ -385,6 +405,8 @@ void Window::refreshSelection(){
     stopAction->setEnabled(building||playing);stopAction->setText(building?"Cancel build":"Stop");
     propertiesAction->setEnabled(exists);buildOptionsAction->setEnabled(exists&&!playing&&!building);removeAction->setEnabled(exists&&!playing&&!building);
     installDlcAction->setEnabled(exists&&!demo);   // the DLC window opens read-only for a game that is running or building
+    installUpdatesAction->setEnabled(exists&&!demo);
+    buildAction->setText(exists&&g->updatePending()?"Rebuild":"Build");
     folderAction->setEnabled(exists);saveFolderAction->setEnabled(exists&&g->hasBuild());logAction->setEnabled(exists&&QFileInfo(QDir(g->buildDir).filePath(g->outputName+".log")).exists());
     const QString version=g?g->version():QString{};
     const QString info=g?g->title+" · "+g->format()+(version.isEmpty()?QString{}:" · v"+version)+" · "+g->renderer:"No selection";
@@ -415,6 +437,94 @@ void Window::dlcReport(const QString& title,const QString& text,bool error){
 }
 // Game > Install DLC…: the game's DLC window. Add DLC… and Remove work on the list (Game.dlc in library.json) and on
 // the build's data folder right away; an unbuilt game keeps the list and gets the DLC when its build finishes.
+// ---- game updates. An update replaces the game's code: the list and the choice are kept in the library, and the
+// game is built again to apply a change (Game::updatePending, the card says "Rebuild"). Its data is then read in
+// place from the game's package and the update's.
+QString Window::updateOutcome(const Game& game) const {
+    const QString next=updateTokenLabel(game,game.updateToken());
+    if(game.updatePending())return "Build the game again to get "+next+" (Build now, or Rebuild on its card); until then it cannot be played.";
+    if(game.hasBuild())return "The current build already is "+next+".";
+    return "The next build will be "+next+".";
+}
+void Window::updateReport(const QString& title,const QString& text,bool error){
+    if(updateDialog)updateDialog->setStatus(text,error);
+    else if(updateQuiet){updateQuiet=false;emit updateFinished(!error,text);}
+    else message(title,text,error);
+}
+void Window::installUpdates(){
+    auto* game=selected();if(!game||demo)return;
+    const QString id=game->id;
+    UpdateDialog dialog(*game,running.contains(id)||(builder.busy()&&builder.gameId()==id),this);updateDialog=&dialog;
+    if(updateProbe.busy())dialog.setBusy(true,"Updates are being checked…");
+    bool build=false;
+    connect(&dialog,&UpdateDialog::addRequested,this,[this](const QStringList& files){installUpdatePackages(files);});
+    connect(&dialog,&UpdateDialog::removeRequested,this,[this,id](const QStringList& packages){removeUpdatePackages(id,packages);});
+    connect(&dialog,&UpdateDialog::choiceRequested,this,[this,id](const QString& choice){setUpdateChoice(id,choice);});
+    connect(&dialog,&UpdateDialog::buildRequested,&dialog,[&dialog,&build]{build=true;dialog.accept();});
+    dialog.exec();updateDialog=nullptr;refreshLibrary();
+    if(build){selectGame(id);startBuild();}
+}
+bool Window::installUpdatePackages(const QStringList& files,bool interactive){
+    updateQuiet=!interactive&&!updateDialog;
+    auto* game=selected();if(!game||demo){updateReport("Cannot install the update","Select a game first.",true);return false;}
+    const QString id=game->id;
+    if(running.contains(id)||(builder.busy()&&builder.gameId()==id)||updateProbe.busy()){updateReport("Game is busy","Wait for this game's build, run or update check to finish first.",true);return false;}
+    QStringList wanted,problems;
+    for(const auto& file:files){
+        const QString path=QFileInfo(file).absoluteFilePath();QString error;
+        bool known=false;for(const auto& have:game->updates)known=known||samePath(have.path,path);
+        for(const auto& have:wanted)known=known||samePath(have,path);
+        if(known)continue;
+        if(validUpdatePackage(path,&error))wanted<<path;else problems<<error;
+    }
+    if(wanted.isEmpty()){
+        if(problems.isEmpty())updateReport("Update already installed","Those packages are already on this game's update list.",false);
+        else updateReport("Cannot install the update",problems.join("\n"),true);
+        return problems.isEmpty();
+    }
+    if(!problems.isEmpty()&&updateQuiet){updateReport("Cannot install the update",problems.join("\n"),true);return false;}
+    // the engine opens each package over the game's own with the keys: that says its version and that it belongs here
+    QString error;
+    if(!updateProbe.start(*game,tools,wanted,&error)){updateReport("Cannot install the update",error,true);return false;}
+    jobLabel->setText("Checking updates…");progress->setVisible(true);progress->setRange(0,0);
+    console->appendPlainText("\nUpdates: "+game->title);
+    if(updateDialog)updateDialog->setBusy(true,problems.isEmpty()?QString("Checking the update against the game…"):problems.join("\n")+"\nChecking the others…");
+    else if(!problems.isEmpty())message("Cannot install the update",problems.join("\n"),true);
+    return true;
+}
+void Window::removeUpdates(const QStringList& packages){
+    updateQuiet=!updateDialog;
+    auto* game=selected();if(!game||demo){updateReport("Cannot remove the update","Select a game first.",true);return;}
+    removeUpdatePackages(game->id,packages);
+}
+void Window::removeUpdatePackages(const QString& id,const QStringList& packages){
+    auto* game=library.find(id);if(!game)return;
+    if(running.contains(id)||(builder.busy()&&builder.gameId()==id)||updateProbe.busy()){updateReport("Game is busy","Wait for this game's build, run or update check to finish first.",true);return;}
+    int removed=0;
+    for(const auto& package:packages)for(int i=game->updates.size()-1;i>=0;--i)if(samePath(game->updates[i].path,package)){
+        if(samePath(game->updateChoice,package))game->updateChoice.clear();   // its choice goes with it: back to the newest
+        game->updates.removeAt(i);++removed;
+    }
+    if(!removed){updateReport("Update not installed","That package is not on this game's update list.",true);return;}
+    save();refreshLibrary();if(updateDialog)updateDialog->setGame(*game);
+    updateReport("Update removed",QString("Removed %1 update%2; the original file%3 not changed. ").arg(removed).arg(removed==1?"":"s").arg(removed==1?" was":"s were")+updateOutcome(*game),false);
+}
+void Window::chooseUpdate(const QString& choice){
+    updateQuiet=!updateDialog;
+    auto* game=selected();if(!game||demo){updateReport("Cannot choose the update","Select a game first.",true);return;}
+    setUpdateChoice(game->id,choice=="newest"?QString{}:choice);
+}
+void Window::setUpdateChoice(const QString& id,const QString& choice){
+    auto* game=library.find(id);if(!game)return;
+    if(running.contains(id)||(builder.busy()&&builder.gameId()==id)){updateReport("Game is busy","Wait for this game's build or run to finish first.",true);return;}
+    QString next=choice;
+    if(!next.isEmpty()&&next!="none"){
+        bool found=false;for(const auto& update:game->updates)if(samePath(update.path,next)){next=update.path;found=true;}
+        if(!found){updateReport("Update not installed","That package is not on this game's update list.",true);return;}
+    }
+    game->updateChoice=next;save();refreshLibrary();if(updateDialog)updateDialog->setGame(*game);
+    updateReport("Version chosen",updateOutcome(*game),false);
+}
 void Window::installDlc(){
     auto* game=selected();if(!game||demo)return;
     const QString id=game->id;
@@ -555,6 +665,7 @@ bool Window::editGame(Game& game,int tab,bool adding){
     artwork->addRow("Background image",browseField(background,&dialog,"Choose background artwork","Images (*.png *.jpg *.jpeg *.webp *.bmp)"));
     auto* note=textLabel("The background follows your selected game and is dimmed behind the gallery. Leave it empty to use the cover. Clear both paths to restore generated artwork.","Muted");note->setWordWrap(true);artwork->addRow(note);
     DlcPanel* dlc=nullptr;if(!adding){dlc=new DlcPanel(game,locked||dlcInstaller.busy());tabs->addTab(dlc,"DLC");}
+    UpdatePanel* updates=nullptr;if(!adding){updates=new UpdatePanel(game,locked||updateProbe.busy());tabs->addTab(updates,"Updates");}
     tabs->widget(1)->setEnabled(!locked);tabs->widget(2)->setEnabled(!locked);
     tabs->setCurrentIndex(qBound(0,tab,tabs->count()-1));
     auto* buttons=new QDialogButtonBox(QDialogButtonBox::Ok|QDialogButtonBox::Cancel);if(adding)buttons->button(QDialogButtonBox::Ok)->setText("Add game");layout->addWidget(buttons);
@@ -569,6 +680,7 @@ bool Window::editGame(Game& game,int tab,bool adding){
         if(adding)game.outputName=outputNameFor(name->text());game.workers=workers->value();game.optimization=optimization->currentIndex();game.renderer=renderer->currentData().toString();game.buttonLayout=buttonLayout->currentData().toString();
         game.cover=QDir::fromNativeSeparators(cover->text().trimmed());game.background=QDir::fromNativeSeparators(background->text().trimmed());
         if(dlc)game.dlc=dlc->packages();
+        if(updates)game.updates=updates->updates();
         if(hasIni&&screenMode->currentData().toBool()!=wasDocked){QString error;if(!writeDocked(game.iniPath(),screenMode->currentData().toBool(),&error)){QMessageBox::warning(&dialog,"Cannot save game settings",error);return;}}
         dialog.accept();
     });
@@ -585,6 +697,13 @@ void Window::showProperties(int tab){
             current->renderer=edited.renderer;current->workers=edited.workers;current->optimization=edited.optimization;
             current->cover=edited.cover;current->background=edited.background;
             dlcChanged=current->dlc!=edited.dlc;current->dlc=edited.dlc;
+            // an update removed in Properties > Updates; the card then asks for a rebuild when the build had it applied
+            if(current->updates.size()!=edited.updates.size()){
+                current->updates=edited.updates;
+                bool kept=current->updateChoice.isEmpty()||current->updateChoice=="none";
+                for(const auto& update:current->updates)kept=kept||samePath(update.path,current->updateChoice);
+                if(!kept)current->updateChoice.clear();
+            }
             const bool layoutChanged=current->buttonLayout!=edited.buttonLayout;current->buttonLayout=edited.buttonLayout;
             // already-built games get the new layout in their INI now, not only at the next Play
             QString error;if(layoutChanged&&current->hasBuild()&&!writeButtonLayout(current->iniPath(),effectiveButtonLayout(*current,library.buttonLayout),&error))

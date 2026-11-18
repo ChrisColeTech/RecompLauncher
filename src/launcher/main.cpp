@@ -55,9 +55,14 @@ int main(int argc, char** argv) {
     parser.addOption({"check-image", "Validate an artwork image using deployed Qt plugins", "file"});
     parser.addOption({"show-appearance", "Open appearance settings"});
     parser.addOption({"show-controller", "Open controller settings"});
-    parser.addOption({"properties-tab", "Tab for --show-properties (0 General, 1 Build, 2 Runtime, 3 Artwork, 4 DLC)", "index"});
+    parser.addOption({"properties-tab", "Tab for --show-properties (0 General, 1 Build, 2 Runtime, 3 Artwork, 4 DLC, 5 Updates)", "index"});
     parser.addOption({"install-dlc", "Install a DLC package for the --select-title game and exit (repeatable)", "package"});
     parser.addOption({"remove-dlc", "Remove a DLC package from the --select-title game and exit (repeatable)", "package"});
+    parser.addOption({"install-update", "Add an update package to the --select-title game and exit (repeatable)", "package"});
+    parser.addOption({"remove-update", "Remove an update package from the --select-title game and exit (repeatable)", "package"});
+    parser.addOption({"update-choice", "Version to build for the --select-title game: newest, none or an installed package", "choice"});
+    parser.addOption({"show-updates", "Open the selected game's Updates window (Game > Install Updates…)"});
+    parser.addOption({"build", "Build the --select-title game with its saved options and exit"});
     parser.addOption({"show-dlc", "Open the selected game's DLC window (Game > Install DLC…)"});
     parser.addOption({"show-menu", "Open a menu of the title bar (File, Game, Keys, View, Help)", "name"});
     parser.addOption({"screenshot", "Save a launcher preview and exit", "png"});
@@ -87,6 +92,23 @@ int main(int argc, char** argv) {
             else window.installDlcPackages(parser.values("install-dlc"),false);
         });
     }
+    if(parser.isSet("install-update")||parser.isSet("remove-update")||parser.isSet("update-choice")) {
+        // the Updates window's actions without dialogs and message boxes; the outcome is the exit code and the window's status text
+        QObject::connect(&window,&Window::updateFinished,&app,[](bool okay,const QString& detail){
+            for(const auto& line:detail.split('\n',Qt::SkipEmptyParts)){if(okay)qInfo("Updates: %s",qPrintable(line));else qCritical("Updates error: %s",qPrintable(line));}
+            QApplication::exit(okay?0:1);
+        });
+        QTimer::singleShot(0,&window,[&]{
+            if(parser.isSet("remove-update"))window.removeUpdates(parser.values("remove-update"));
+            else if(parser.isSet("update-choice"))window.chooseUpdate(parser.value("update-choice"));
+            else window.installUpdatePackages(parser.values("install-update"),false);
+        });
+    }
+    if(parser.isSet("build")) {
+        QObject::connect(&window,&Window::smokeFinished,&app,[](bool okay){QApplication::exit(okay?0:1);});
+        QTimer::singleShot(0,&window,[&window]{window.startBuild();});
+    }
+    if(parser.isSet("show-updates")) QTimer::singleShot(0,&window,[&window]{window.showUpdates();});
     if(parser.isSet("show-dlc")) QTimer::singleShot(0,&window,[&window]{window.showDlc();});
     if(parser.isSet("show-menu")) QTimer::singleShot(300,&window,[&window,name=parser.value("show-menu")]{window.showMenu(name);});
     if(parser.isSet("show-filters")) QTimer::singleShot(0,&window,[&window]{window.showFilters();});

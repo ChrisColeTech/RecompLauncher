@@ -10,6 +10,7 @@ class LibraryCanvas;
 class GameCard;
 class FilterPopup;
 class DlcDialog;
+class UpdateDialog;
 class QFrame;
 class QMenuBar;
 class TitleBar;
@@ -47,9 +48,16 @@ public:
     // Remove of the DLC window for the selected game, without message boxes (--remove-dlc): dlcFinished reports.
     void removeDlc(const QStringList& packages);
     void showDlc() { installDlc(); }     // Game > Install DLC…: the game's DLC window
+    // Game > Install Updates…: the game's Updates window, and its actions without dialogs or message boxes
+    // (--install-update, --remove-update, --update-choice): updateFinished reports.
+    void showUpdates() { installUpdates(); }
+    bool installUpdatePackages(const QStringList& files, bool interactive = true);
+    void removeUpdates(const QStringList& packages);
+    void chooseUpdate(const QString& choice);   // "newest", "none" or a package path
 signals:
     void smokeFinished(bool success);
     void dlcFinished(bool success, const QString& detail);
+    void updateFinished(bool success, const QString& detail);
     void toolsChanged();
 protected:
     void dragEnterEvent(QDragEnterEvent*) override;
@@ -82,6 +90,11 @@ private:
     enum DlcReason { DlcInstalled, DlcBuilt, DlcPlay, DlcChanged };
     bool startDlcSync(const QString& id, DlcReason reason);
     void removeDlcPackages(const QString& id, const QStringList& packages);
+    void installUpdates();
+    void removeUpdatePackages(const QString& id, const QStringList& packages);
+    void setUpdateChoice(const QString& id, const QString& choice);
+    void updateReport(const QString& title, const QString& text, bool error);
+    QString updateOutcome(const Game& game) const;   // what the next build will be, and whether it is needed
     void dlcReport(const QString& title, const QString& text, bool error);
     void showContextMenu(const QPoint& global);
     void showToolPopup();
@@ -93,6 +106,8 @@ private:
     Toolchain tools;
     BuildManager builder;
     DlcInstaller dlcInstaller;
+    UpdateProbe updateProbe;
+    bool updateQuiet = false;
     DlcReason dlcReason = DlcInstalled;
     bool dlcQuiet = false;
     QString selectedId, healthText;
@@ -118,11 +133,12 @@ private:
     QProgressBar* progress = nullptr;
     QPointer<QFrame> toolPopup;
     QPointer<DlcDialog> dlcDialog;
+    QPointer<UpdateDialog> updateDialog;
     QString buildPhase;
     int buildCurrent = 0, buildTotal = 0;
     QAction *addAction = nullptr, *addFolderAction = nullptr, *importAction = nullptr, *playAction = nullptr,
         *buildAction = nullptr, *stopAction = nullptr, *propertiesAction = nullptr, *removeAction = nullptr,
         *folderAction = nullptr, *logAction = nullptr, *saveFolderAction = nullptr, *settingsAction = nullptr,
         *galleryAction = nullptr, *tableAction = nullptr, *backgroundAction = nullptr, *buildOptionsAction = nullptr,
-        *installKeysAction = nullptr, *installDlcAction = nullptr;
+        *installKeysAction = nullptr, *installDlcAction = nullptr, *installUpdatesAction = nullptr;
 };
