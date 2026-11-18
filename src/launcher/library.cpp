@@ -378,6 +378,25 @@ static bool writeIniKey(const QString& ini, const QString& section, const QStrin
     if (output.write(bytes) != bytes.size() || !output.commit()) return fail(error, output.errorString());
     return true;
 }
+bool readDocked(const QString& ini) {
+    QFile file(ini);
+    bool docked = true;
+    if (!file.open(QIODevice::ReadOnly)) return docked;
+    for (const auto& line : QString::fromUtf8(file.readAll()).split('\n')) {
+        const auto trimmed = line.trimmed();
+        if (trimmed.startsWith("docked=")) docked = trimmed.mid(7).trimmed() != "0";
+    }
+    return docked;
+}
+bool writeDocked(const QString& ini, bool docked, QString* error) {
+    // The engine moves an INI without settings_version (or below 2) to TV mode once; a choice made here is not one to move,
+    // so such an INI gets version 2. A version the engine wrote stays.
+    QFile file(ini);
+    const bool versioned = file.open(QIODevice::ReadOnly) && QString::fromUtf8(file.readAll()).contains("settings_version=");
+    file.close();
+    return writeIniKey(ini, "Display", "docked", docked ? "1" : "0", error)
+        && (versioned || writeIniKey(ini, "Other", "settings_version", "2", error));
+}
 bool writeRenderer(const QString& ini, const QString& renderer, QString* error) {
     if (renderer != "vulkan" && renderer != "opengl") return fail(error, "Unknown renderer.");
     return writeIniKey(ini, "Graphics", "renderer", renderer, error);

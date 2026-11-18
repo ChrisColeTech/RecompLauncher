@@ -128,6 +128,15 @@ private slots:
         QVERIFY(text.contains("renderer=vulkan\r\n")); QVERIFY(text.contains("resolution=0.75"));
         QVERIFY(text.contains("; keep this comment")); QVERIFY(text.contains("audio_slowdown=0"));
     }
+    void screenModeIni() {
+        QTemporaryDir tmp; const QString path=tmp.filePath("Game.ini");
+        QVERIFY(readDocked(path));   // no INI yet: TV mode, the engine's default
+        {QFile f(path); QVERIFY(f.open(QIODevice::WriteOnly)); f.write("[Display]\r\ndocked=1\r\nfullscreen=1\r\n[Graphics]\r\nrenderer=vulkan\r\n");}
+        QString error; QVERIFY2(writeDocked(path,false,&error),qPrintable(error)); QVERIFY(!readDocked(path));
+        {QFile result(path); QVERIFY(result.open(QIODevice::ReadOnly)); const auto text=result.readAll();
+         QVERIFY(text.contains("docked=0\r\n")); QVERIFY(text.contains("fullscreen=1")); QVERIFY(text.contains("renderer=vulkan")); QVERIFY(text.contains("settings_version=2"));}
+        QVERIFY2(writeDocked(path,true,&error),qPrintable(error)); QVERIFY(readDocked(path));
+    }
     void buttonLayoutIni() {
         QTemporaryDir tmp; const QString path=tmp.filePath("Game.ini");
         // the runtime's own INI: [Controls] already has the key (it writes every key with its default)

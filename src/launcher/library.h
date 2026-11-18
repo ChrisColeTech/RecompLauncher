@@ -86,6 +86,9 @@ bool writeButtonLayout(const QString& ini, const QString& layout, QString* error
 // Everything the launcher owns in a game's INI (renderer + button layout), written at build, play and settings change.
 bool writeGameSettings(const Game& game, const QString& launcherLayout, QString* error);
 QString readRenderer(const QString& ini);
+// The engine's docked key: true = TV mode (the game renders for a television: sharper), false = handheld mode. TV mode when the INI has no value.
+bool readDocked(const QString& ini);
+bool writeDocked(const QString& ini, bool docked, QString* error);
 bool samePath(const QString& left, const QString& right);
 bool inPlacePackage(const QString& path);
 QString toolkitProjectRoot(const QString& toolRoot);

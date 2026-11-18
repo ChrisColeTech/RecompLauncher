@@ -428,7 +428,11 @@ bool Window::editGame(Game& game,int tab,bool adding){
     auto* runtime=tabForm(tabs,"Runtime");auto* renderer=new QComboBox;renderer->addItem("Vulkan — native NVN","vulkan");renderer->addItem("OpenGL — compatibility","opengl");renderer->setCurrentIndex(qMax(0,renderer->findData(game.renderer)));runtime->addRow("Graphics backend",renderer);
     auto* buttonLayout=new QComboBox;buttonLayout->addItem("Use default — "+buttonLayoutName(library.buttonLayout),QString());addButtonLayouts(buttonLayout);
     buttonLayout->setCurrentIndex(qMax(0,buttonLayout->findData(game.buttonLayout)));runtime->addRow("Controller layout",buttonLayout);
-    auto* runtimeNote=textLabel("Vulkan needs the bundled shader tools, Python, and .NET 10.\n\nOther runtime options remain in the game's INI. Renderer changes are applied when you next play; the controller layout is saved right away (the default is in Settings > Controller).","Muted");runtimeNote->setWordWrap(true);runtime->addRow(runtimeNote);
+    const bool hasIni=QFileInfo(game.iniPath()).exists(),wasDocked=readDocked(game.iniPath());
+    auto* screenMode=new QComboBox;screenMode->addItem("TV mode — full resolution (recommended)",true);screenMode->addItem("Handheld mode — the console's own screen, faster",false);
+    screenMode->setCurrentIndex(wasDocked?0:1);screenMode->setEnabled(hasIni);screenMode->setToolTip("TV mode: the game renders as it does docked (Switch 1920x1080, Switch 2 up to 2560x1440 and more). Handheld mode: 1280x720 on a Switch, 1920x1080 on a Switch 2, softer on a monitor but lighter on the GPU. Available once the game is built.");
+    runtime->addRow("Screen mode",screenMode);
+    auto* runtimeNote=textLabel("Vulkan needs the bundled shader tools, Python, and .NET 10.\n\nOther runtime options remain in the game's INI. Renderer and screen mode changes are applied when you next play; the controller layout is saved right away (the default is in Settings > Controller).","Muted");runtimeNote->setWordWrap(true);runtime->addRow(runtimeNote);
     auto* openIni=new QPushButton("Open game settings file");openIni->setEnabled(QFileInfo(game.iniPath()).exists());runtime->addRow("",openIni);connect(openIni,&QPushButton::clicked,&dialog,[&game]{QDesktopServices::openUrl(QUrl::fromLocalFile(game.iniPath()));});
     auto* artwork=tabForm(tabs,"Artwork");auto* cover=new QLineEdit(game.cover);auto* background=new QLineEdit(game.background);
     artwork->addRow("Cover image",browseField(cover,&dialog,"Choose cover","Images (*.png *.jpg *.jpeg *.webp *.bmp)"));
@@ -446,7 +450,9 @@ bool Window::editGame(Game& game,int tab,bool adding){
         game.title=title->text().trimmed();game.source=source->text().trimmed().isEmpty()?QString{}:QFileInfo(QDir::fromNativeSeparators(source->text().trimmed())).absoluteFilePath();
         game.buildDir=QFileInfo(QDir::fromNativeSeparators(destination->text().trimmed())).absoluteFilePath();
         if(adding)game.outputName=outputNameFor(name->text());game.workers=workers->value();game.optimization=optimization->currentIndex();game.renderer=renderer->currentData().toString();game.buttonLayout=buttonLayout->currentData().toString();
-        game.cover=QDir::fromNativeSeparators(cover->text().trimmed());game.background=QDir::fromNativeSeparators(background->text().trimmed());dialog.accept();
+        game.cover=QDir::fromNativeSeparators(cover->text().trimmed());game.background=QDir::fromNativeSeparators(background->text().trimmed());
+        if(hasIni&&screenMode->currentData().toBool()!=wasDocked){QString error;if(!writeDocked(game.iniPath(),screenMode->currentData().toBool(),&error)){QMessageBox::warning(&dialog,"Cannot save game settings",error);return;}}
+        dialog.accept();
     });
     return dialog.exec()==QDialog::Accepted;
 }
