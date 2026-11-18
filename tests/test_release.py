@@ -43,7 +43,7 @@ class ReleaseChecks(unittest.TestCase):
                      'toolchain/gcc/licenses', 'toolchain/shader-tools/licenses'):
             path = root / name; path.mkdir(parents=True, exist_ok=True); (path / 'LICENSE').write_text('fixture')
         runtime = root / ENGINE / 'bin' / package.runtime_name(platform)
-        runtime.write_bytes(b'WebM Project VP9 Decoder\0dav1d %s decoding AV1\0Error parsing OBU data\0frame telemetry:\0hid.dll\0setupapi.dll')
+        runtime.write_bytes(b'WebM Project VP9 Decoder\0dav1d %s decoding AV1\0Error parsing OBU data\0audio: opus decoder %uHz\0frame telemetry:\0hid.dll\0setupapi.dll')
         manifest = {'platform': platform, 'downloads': {'libvpx': {'sha256': '0' * 64, 'sources': {
             p.name: {'sha256': package.digest(p)} for p in (root / LEGAL / 'sources').glob('libvpx*')}},
             'dav1d': {'sha256': '0' * 64, 'sources': {
@@ -64,7 +64,7 @@ class ReleaseChecks(unittest.TestCase):
                          'recomp_cli.py', 'nup.py', 'zbic.py', 'dlc.py', 'tools/nxshader/s2r_paths.py',
                          'tools/nxshader/xlate_bin/dmsh_xlate.runtimeconfig.json', 'bin/' + package.runtime_name(platform))] + [
                          package.launcher_name(platform), 'legal/NOTICE.txt', 'legal/licenses/libvpx/LICENSE-libvpx.txt',
-                         'legal/licenses/dav1d/LICENSE-dav1d.txt', 'legal/sources/dav1d-1.5.5.tar.xz',
+                         'legal/licenses/dav1d/LICENSE-dav1d.txt', 'legal/licenses/opus/LICENSE-opus.txt', 'legal/sources/dav1d-1.5.5.tar.xz',
                          'legal/sources/libvpx_1.14.0-1ubuntu2.3.debian.tar.xz', 'toolchain/dotnet/LICENSE.txt']:
                 path = root / name; data = path.read_bytes(); path.unlink()
                 with self.assertRaises(FileNotFoundError, msg=name): package.validate_contents(root, platform)
@@ -93,7 +93,7 @@ class ReleaseChecks(unittest.TestCase):
 
     def test_runtime_requires_vp9_nvn_telemetry_and_sony(self):
         root = self.bundle('windows'); runtime = root / ENGINE / 'bin/runtime_win64_win32.exe'; data = runtime.read_bytes()
-        for marker in (b'WebM Project VP9 Decoder', b'dav1d %s decoding AV1', b'Error parsing OBU data', b'frame telemetry:', b'hid.dll', b'setupapi.dll'):
+        for marker in (b'WebM Project VP9 Decoder', b'dav1d %s decoding AV1', b'Error parsing OBU data', b'audio: opus decoder %uHz', b'frame telemetry:', b'hid.dll', b'setupapi.dll'):
             runtime.write_bytes(data.replace(marker, b''))
             with self.assertRaisesRegex(RuntimeError, 'Native runtime feature'): package.validate_contents(root, 'windows')
         runtime.write_bytes(data)
