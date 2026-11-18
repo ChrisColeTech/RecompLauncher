@@ -34,6 +34,7 @@ struct Game {
     QString dataDir() const;
     QString iniPath() const;
     QString format() const;
+    QString version() const; // The built game's display version ("1.1.1"), from the control data the build staged.
     bool hasBuild() const;
     bool sourceAvailable() const;
     QJsonObject json() const;
@@ -91,6 +92,9 @@ QString readRenderer(const QString& ini);
 bool readDocked(const QString& ini);
 bool writeDocked(const QString& ini, bool docked, QString* error);
 bool samePath(const QString& left, const QString& right);
+// A package that holds the game together with its DLC (1G+1U+1D): the first build from it puts it on the game's DLC list.
+// builtBefore is the source of the previous build; a rebuild does not put back a package the user removed from the list.
+bool adoptPackageDlc(Game& game, const QString& builtBefore);
 
 // Add-on content (DLC). The engine installs a package into the built game's data folder (switchrecomp.py
 // --install-dlc / --sync-dlc: <data>/dlc.manifest plus <data>/dlc/<title id>/); the launcher keeps the list of

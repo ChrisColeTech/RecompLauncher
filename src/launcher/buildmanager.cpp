@@ -50,7 +50,7 @@ bool BuildManager::start(const Game& next, const Toolchain& tools, int jobs, QSt
     }
     if (!validSource(next.source, error)) return false;
     if (next.buildDir.isEmpty() || !QDir().mkpath(next.buildDir)) { *error = "Cannot create the build output folder."; return false; }
-    game = next; cancelled = false; pending.clear();
+    game = next; cancelled = false; holdsDlc = false; pending.clear();
     log.setFileName(QDir(game.buildDir).filePath(game.outputName + ".build.log"));
     if (!log.open(QIODevice::WriteOnly | QIODevice::Truncate)) { *error = log.errorString(); return false; }
     log.write(("SwitchRecomp build · " + QDateTime::currentDateTime().toString(Qt::ISODate) + "\n").toUtf8());
@@ -82,6 +82,7 @@ void BuildManager::parseLine(const QString& line) {
     } else if (line.startsWith("Analyzing")) emit progress("Analyzing ARM64 code", 0, 0);
     else if (line.startsWith("Linking")) emit progress("Linking native module", 0, 0);
     else if (line.startsWith("RomFS:")) emit progress("Preparing game data", 0, 0);
+    else if (reportsPackageDlc(line)) holdsDlc = true;
 }
 void BuildManager::complete(bool success, const QString& detail) {
     if (!active) return;

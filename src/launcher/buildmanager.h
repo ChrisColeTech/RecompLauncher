@@ -15,6 +15,9 @@ public:
     bool busy() const { return active; }
     QString gameId() const { return game.id; }
     static QStringList arguments(const Game& game, const Toolchain& tools, int jobs);
+    // The engine said the package just built also holds add-on content (a 1G+1U+1D NSP).
+    bool sourceHoldsDlc() const { return holdsDlc; }
+    static bool reportsPackageDlc(const QString& line) { return line.startsWith("DLC: this package also holds add-on content"); }
 signals:
     void output(const QString& text);
     void progress(const QString& phase, int current, int total);
@@ -27,7 +30,7 @@ private:
     QFile log;
     QByteArray pending;
     Game game;
-    bool active = false, cancelled = false;
+    bool active = false, cancelled = false, holdsDlc = false;
 };
 
 // Add-on content: runs the engine's --sync-dlc for one built game, after which its data folder holds exactly the

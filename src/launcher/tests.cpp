@@ -319,6 +319,25 @@ private slots:
         QVERIFY(samePath("P:\\Games\\Title.nup","P:/Games/Title.nup"));
 #endif
     }
+    void combinedNspBuild(){
+        // a build from a package that holds the game, its update and its DLC: marker version 2, the update's version, the DLC list
+        QTemporaryDir tmp;const auto build=tmp.filePath("Builds/Kart 1G1U1D");const auto source=tmp.filePath("Kart [v262144] (1G+1U+1D).nsp");
+        for(const auto& path:{source,build+"/Kart 1G1U1D"+executableSuffix,build+"/Kart 1G1U1D"+moduleSuffix})writeFile(path,"PFS0fixture");
+        writeFile(build+"/Kart 1G1U1D_data/romfs.nsp","SWRNSP2\n"+QDir::toNativeSeparators(source).toUtf8()+"\nkeys K:/prod.keys\nromfs 800 4000\nbase 0 0 0 3 0 titlekek_02:00\n");
+        Game game;QString error;QVERIFY2(gameFromExecutable(build+"/Kart 1G1U1D"+executableSuffix,&game,&error),qPrintable(error));
+        QVERIFY(samePath(game.source,source));QVERIFY(game.hasBuild());QCOMPARE(game.format(),QString("DIRECT NSP"));
+        QCOMPARE(game.version(),QString{});
+        QByteArray nacp(0x4000,'\0');nacp.replace(0x3060,5,"1.2.3");writeFile(build+"/Kart 1G1U1D_data/control.nacp",nacp);
+        QCOMPARE(game.version(),QString("1.2.3"));
+        QVERIFY(BuildManager::reportsPackageDlc("DLC: this package also holds add-on content 0100152000023001; install it with --install-dlc (the launcher does)"));
+        QVERIFY(!BuildManager::reportsPackageDlc("DLC: installed 0100152000023001 v65536"));
+        // the first build from the package lists it; a rebuild does not put back what the user removed, and nothing is listed twice
+        QCOMPARE(outputNameFor(QString::fromUtf8("Pok\xC3\xA9mon Legends - Arceus (1G+1U)")),QString("Pokemon Legends - Arceus 1G1U"));
+        QCOMPARE(outputNameFor(QString::fromUtf8("\xE3\x82\xBC\xE3\x83\xAB\xE3\x83\x80")),QString("Game"));
+        Game fresh=gameFromSource(source);QVERIFY(adoptPackageDlc(fresh,{}));QCOMPARE(fresh.dlc.size(),1);QVERIFY(samePath(fresh.dlc[0],source));
+        QVERIFY(!adoptPackageDlc(fresh,tmp.filePath("other.nsp")));QCOMPARE(fresh.dlc.size(),1);
+        fresh.dlc.clear();QVERIFY(!adoptPackageDlc(fresh,QDir::toNativeSeparators(source)));QVERIFY(fresh.dlc.isEmpty());
+    }
     void nspSourceClassification(){
         QTemporaryDir tmp;const QString path=tmp.filePath("Game.nsp");
         {QFile file(path);QVERIFY(file.open(QIODevice::WriteOnly));file.write("PFS0");file.write(QByteArray(16,'\0'));}

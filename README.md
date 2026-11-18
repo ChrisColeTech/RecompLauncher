@@ -17,10 +17,13 @@ Everything a build needs ships in the archive: Python, GCC, .NET and the shader 
 
 ## What you need
 
-- **Your own game dumps**: `.nup` packages, supported `.nsp` packages, homebrew `.nro`, or an extracted folder
-  with `exefs/main`. No games, keys or firmware are included or downloaded.
-- **`prod.keys`** for `.nsp` builds and for DLC, installed once with **Keys → Install keys…**. Encrypted, sparse and
-  update-only NSPs are not supported ([details](docs/NSP_IN_PLACE.md#supported-packages)).
+- **Your own game dumps**: `.nup` packages, `.nsp` packages, homebrew `.nro`, or an extracted folder with
+  `exefs/main`. An `.nsp` can be a plain game, an encrypted Switch 1 game, or a **combined** package that holds the
+  game with its update and DLC (`1G+1U`, `1G+1U+1D`): the update is applied while the game reads its data, nothing
+  is extracted. No games, keys or firmware are included or downloaded.
+- **`prod.keys`** for `.nsp` builds and for DLC, installed once with **Keys → Install keys…**. Update-only NSPs
+  (without the game in the same file), tickets bound to one console and sparse or compressed packages are not
+  supported ([details](docs/NSP_IN_PLACE.md#supported-packages)).
 - **A 64-bit CPU with AVX2** and a GPU driver with Vulkan support. On Linux: Ubuntu 24.04 or newer, with X11 or
   XWayland.
 

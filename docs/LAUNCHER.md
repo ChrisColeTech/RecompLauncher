@@ -23,7 +23,7 @@ only the EXE. The engine is found by walking up from the launcher's directory un
 
 ## Add, build, play
 
-1. **Add game:** select a `.nup`, supported `.nsp`, or `.nro`, or drop it into the library. The dropdown also accepts extracted
+1. **Add game:** select a `.nup`, `.nsp` (also one that holds the game with its update and DLC), or `.nro`, or drop it into the library. The dropdown also accepts extracted
    game folders and existing native builds.
 2. In the add dialog, choose the display name under **General** and build location under **Build**, then click
    **Add game**. Later use the card's sliders button or **Alt+Enter** for Properties; save edits with **OK**.
@@ -77,8 +77,10 @@ marked as needing a build rather than treating partially overwritten artifacts a
 
 The package picker explicitly offers `*.nup *.nsp *.nro`. The launcher checks a `.nsp` for PFS0 magic and labels it
 **DIRECT NSP**. This is an import check, not full package validation. The recompiler supports application NSPs with
-an NCA3 Program archive, plaintext PartitionFS ExeFS and plaintext IVFC RomFS. Encrypted filesystem sections,
-rights-managed data, sparse/compressed layouts and BKTR update-only packages are unsupported. See
+plaintext or AES-CTR encrypted ExeFS and RomFS, and combined packages that hold the game and its update (the update's
+BKTR patch is applied in place; a package's DLC joins the game's DLC list on the first build). Update-only packages,
+tickets bound to one console and sparse/compressed layouts are refused with the reason. The built game's version is
+shown in the selection line and in **Properties → General**. See
 [NSP_IN_PLACE.md](NSP_IN_PLACE.md#supported-packages) for hactool/key requirements and
 [NUP_IN_PLACE.md](NUP_IN_PLACE.md) for indexed NUP restrictions. Renaming another format does not convert it.
 
@@ -279,7 +281,7 @@ Verification for these docs (November 15, 2026):
 ## Release integration
 
 The launcher is a frontend, not a replacement for the toolkit. A Windows release should contain this deployed
-Qt folder together with the toolkit's `switchrecomp.py` and its Python modules (`nup.py`, `nsp.py`, `dlc.py`,
+Qt folder together with the toolkit's `switchrecomp.py` and its Python modules (`nup.py`, `nsp.py`, `nca.py`, `dlc.py`,
 `nxloader.py`, `a64.py`, `codegen.py`), the built `runtime_win64_win32.exe`, shader tools and their ABI
 header/licenses, scripts/docs, and the engine's LICENSE.txt/NOTICE.txt. Portable Python/GCC may be installed
 by `scripts/setup.bat`; .NET 10 is required for the live Vulkan shader translator. Game builds stage shader

@@ -153,7 +153,11 @@ Window::Window(const QString& file,const QString& root,bool isDemo):library(file
     });
     connect(&builder,&BuildManager::finished,this,[this](const QString& id,bool okay,const QString& detail){
         if(auto* game=library.find(id)){
-            if(okay){game->builtSource=game->source;game->buildIncomplete=false;game->lastBuilt=QDateTime::currentDateTime();}
+            if(okay){
+                // a package with the game and its DLC in one file: the first build from it lists it as the game's DLC too
+                if(builder.sourceHoldsDlc()&&adoptPackageDlc(*game,game->builtSource))console->appendPlainText("DLC: "+QFileInfo(game->source).fileName()+" is now on this game's DLC list");
+                game->builtSource=game->source;game->buildIncomplete=false;game->lastBuilt=QDateTime::currentDateTime();
+            }
             save();
         }
         console->appendPlainText("\n"+detail);buildDock->setWindowTitle(okay?"Build output — complete":"Build output — stopped");
@@ -382,7 +386,8 @@ void Window::refreshSelection(){
     propertiesAction->setEnabled(exists);buildOptionsAction->setEnabled(exists&&!playing&&!building);removeAction->setEnabled(exists&&!playing&&!building);
     installDlcAction->setEnabled(exists&&!demo);   // the DLC window opens read-only for a game that is running or building
     folderAction->setEnabled(exists);saveFolderAction->setEnabled(exists&&g->hasBuild());logAction->setEnabled(exists&&QFileInfo(QDir(g->buildDir).filePath(g->outputName+".log")).exists());
-    const QString info=g?g->title+" · "+g->format()+" · "+g->renderer:"No selection";
+    const QString version=g?g->version():QString{};
+    const QString info=g?g->title+" · "+g->format()+(version.isEmpty()?QString{}:" · v"+version)+" · "+g->renderer:"No selection";
     selectionLabel->setText(fontMetrics().elidedText(info,Qt::ElideRight,390));selectionLabel->setToolTip(g?info+"\n"+displayPath(g->source):info);
     canvas->setBackground(g?(g->background.isEmpty()?g->cover:g->background):QString{},library.showBackground);
     for(auto it=cards.begin();it!=cards.end();++it)it.value()->setSelected(it.key()==selectedId);
@@ -530,7 +535,7 @@ bool Window::editGame(Game& game,int tab,bool adding){
     auto* general=tabForm(tabs,"General");auto* title=new QLineEdit(game.title);auto* source=new QLineEdit(game.source.isEmpty()?QString{}:displayPath(game.source));
     general->addRow("Display name",title);auto* sourceField=browseField(source,&dialog,"Choose source","Game packages (*.nup *.nsp *.nro);;All files (*)");sourceField->setEnabled(!locked);general->addRow("Source",sourceField);
     auto* folder=new QPushButton("Choose extracted folder…");folder->setEnabled(!locked);general->addRow("",folder);connect(folder,&QPushButton::clicked,&dialog,[&dialog,source]{auto p=QFileDialog::getExistingDirectory(&dialog,"Choose extracted game folder");if(!p.isEmpty())source->setText(QDir::toNativeSeparators(p));});
-    general->addRow("Format",textLabel(game.format()));general->addRow("Status",textLabel(adding?"Not built":statusFor(game)));
+    general->addRow("Format",textLabel(game.format()));if(!game.version().isEmpty())general->addRow("Version",textLabel(game.version()));general->addRow("Status",textLabel(adding?"Not built":statusFor(game)));
     auto* pathsNote=textLabel("NUP/NSP game data stays in the original package. Changing the source requires a rebuild.","Muted");pathsNote->setWordWrap(true);general->addRow(pathsNote);
     auto* build=tabForm(tabs,"Build");auto* destination=new QLineEdit(displayPath(game.buildDir));build->addRow("Build folder",browseField(destination,&dialog,"Choose build output folder",{},true));
     auto* name=new QLineEdit(game.outputName);name->setReadOnly(!adding);build->addRow("Executable name",name);
@@ -648,6 +653,7 @@ bool Window::importBuild(const QString& executable){
 }
 void Window::startBuild(){
     auto* game=selected();if(!game||demo||running.contains(game->id))return;
+    game->outputName=outputNameFor(game->outputName);   // a name from an older library keeps step with what the engine writes
     Game build=*game;build.buttonLayout=effectiveButtonLayout(*game,library.buttonLayout);
     QString error;if(!builder.start(build,tools,library.jobs,&error)){emit smokeFinished(false);message("Cannot start build",error,true);return;}
     game->buildIncomplete=true;save();console->clear();console->appendPlainText("Source: "+displayPath(game->source)+"\nOutput: "+displayPath(game->buildDir)+"\n");

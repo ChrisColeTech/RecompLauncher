@@ -81,6 +81,19 @@ QString Game::format() const {
     if (source.endsWith(".nro", Qt::CaseInsensitive)) return "HOMEBREW";
     return source.isEmpty() ? "NATIVE BUILD" : "EXTRACTED";
 }
+QString Game::version() const {
+    QFile nacp(QDir(dataDir()).filePath("control.nacp"));
+    if (!nacp.open(QIODevice::ReadOnly) || !nacp.seek(0x3060)) return {};
+    const QByteArray raw = nacp.read(16);
+    const QString text = QString::fromUtf8(raw.left(raw.indexOf('\0') < 0 ? raw.size() : raw.indexOf('\0')));
+    return !text.isEmpty() && text[0].isDigit() ? text : QString{};
+}
+bool adoptPackageDlc(Game& game, const QString& builtBefore) {
+    if (game.source.isEmpty() || samePath(builtBefore, game.source)) return false;
+    for (const auto& package : game.dlc) if (samePath(package, game.source)) return false;
+    game.dlc << absolute(game.source);
+    return true;
+}
 bool Game::hasBuild() const {
     return !buildIncomplete && !buildDir.isEmpty() && !outputName.isEmpty() && QFileInfo(executable()).isFile()
         && QFileInfo(codeModule()).isFile() && QDir(dataDir()).exists()
@@ -281,8 +294,12 @@ int Library::discoverBuilds(const QString& folder) {
 }
 
 QString outputNameFor(const QString& title) {
+    // ASCII only, as the engine names its output (switchrecomp.py output_name): an accented letter loses its accent
+    // ("Pokémon" -> "Pokemon"). The runtime and its shader tools hand these paths to each other as bytes, and a name
+    // outside ASCII does not survive that. The display title keeps its spelling.
     QString result;
-    for (auto ch : title) if (ch.isLetterOrNumber() || QString("-_ ").contains(ch)) result += ch;
+    for (auto ch : title.normalized(QString::NormalizationForm_KD))
+        if (ch.unicode() < 128 && (ch.isLetterOrNumber() || QString("-_ ").contains(ch))) result += ch;
     return result.trimmed().isEmpty() ? "Game" : result.trimmed();
 }
 bool samePath(const QString& left,const QString& right){
@@ -409,7 +426,8 @@ bool gameFromExecutable(const QString& path, Game* game, QString* error) {
     if (marker.open(QIODevice::ReadOnly)) g.source = QString::fromUtf8(marker.readLine()).trimmed();
     if (g.source.isEmpty()) {
         QFile nspMarker(QDir(g.dataDir()).filePath("romfs.nsp"));
-        if (nspMarker.open(QIODevice::ReadOnly) && nspMarker.readLine().trimmed() == "SWRNSP1")
+        // SWRNSP2: an encrypted package, or one that holds the game with its update; the package path is line 2 in both
+        if (nspMarker.open(QIODevice::ReadOnly) && QByteArrayList{"SWRNSP1", "SWRNSP2"}.contains(nspMarker.readLine().trimmed()))
             g.source = QString::fromUtf8(nspMarker.readLine()).trimmed();
     }
     g.builtSource = g.source; g.renderer = readRenderer(g.iniPath());
