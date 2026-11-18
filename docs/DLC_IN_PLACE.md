@@ -420,7 +420,7 @@ equals the engine's `bin/runtime_win64_win32.exe`), the save was backed up befor
 - The title screen shows "Ver. 1.0.0": the runtime's display version, unrelated to DLC.
 - BKTR and AES-XTS data sections are refused; no add-on content with either was seen.
 - ~~Building a game straight from a combined NSP (game + update in one file) is not supported.~~ Since launcher
-  0.5.x it is: the update's BKTR patch is applied in place, and a `1G+1U+1D` package joins the game's DLC list on
+  0.5.2 it is: the update's BKTR patch is applied in place, and a `1G+1U+1D` package joins the game's DLC list on
   the first build ([NSP_IN_PLACE.md](NSP_IN_PLACE.md)). A game built that way also gets its real display version
   instead of "Ver. 1.0.0"; a game built from an extracted dump shows the version of a `control.nacp` placed in the
   dump folder, else still 1.0.0.

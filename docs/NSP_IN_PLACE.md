@@ -97,3 +97,9 @@ The Mario Kart World 1.8.0 validation build analyzed 244,016 functions and 13,92
 units, staged seven ExeFS files, and read a 22.4 GB RomFS directly from the original NSP. Native Vulkan ran past 2,100
 presented frames and reached about 60 FPS after disabling an obsolete system validation layer. Set
 `NXRT_VK_VALIDATION=1` only for diagnostics with a current Vulkan SDK.
+
+Combined packages were verified on the real library (launcher 0.5.2, 2026-11-18): Pokémon Legends: Arceus `(1G+1U)`
+shows `DIRECT NSP · v1.1.1` and plays its opening into the first scene of the Obsidian Fieldlands; Pokémon Violet
+`(1G+1U+1D)` shows `v4.0.0`, lists its package under DLC, and plays its opening until an audio crash at the end of
+it (an engine gap, not a package one). Details and the evidence folder: the engine's
+[COMBINED_NSP.md](../third_party/Switch2RECOMP/docs/COMBINED_NSP.md#8-results-2026-11-18).
