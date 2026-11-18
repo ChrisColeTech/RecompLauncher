@@ -1,6 +1,18 @@
 # Add-On Content (DLC): Install And Run In Place
 
-Status 2026-11-17 (evening): investigated and planned, nothing built. Mario Kart 8 Deluxe's Booster Course
+Status 2026-11-18: **built and shipped** (launcher 0.5.0, engine `turbo` b8f487a and later). **Game → Install DLC…**
+installs NSP, NSZ, XCI, XCZ and NCA packages; Mario Kart 8 Deluxe's Booster Course Pass (BCP) plays: with the DLC
+installed Golden Dash Cup starts and Paris Promenade races, without it the same cup shows the purchase notice.
+What was built, what differs from the plan and the verification are in [section 7](#7-what-was-built-2026-11-18);
+sections 1 to 6 are the investigation and plan of 2026-11-17, with corrections marked where the build proved them
+wrong. The two that matter:
+
+- **The DLC's RomFS is readable** (1.3, 6.1). The ticket is a common ticket, not a console-bound one, so its title
+  key decrypts with `titlekek_0c` from `prod.keys`. The RomFS holds `version.txt` and `contents.dat`.
+- **A stub storage does not work** (3.1, 6.5). The game reads both files at boot; with the title listed and an
+  empty RomFS it hangs on the loading screen after L+R. The real RomFS is installed; nothing is synthesized.
+
+The plan as written on 2026-11-17: Mario Kart 8 Deluxe's Booster Course
 Pass (BCP) needs no new data on disk — the 48 course folders are already inside the extracted dump's RomFS —
 it needs the *license* to exist at runtime: an `aoc:u` answer that a DLC is installed (the runtime's existing
 `aoc:u` hardcodes "none"), plus a mountable AOC data storage for fsp-srv cmd 202. The real AOC NCA on disk
@@ -65,6 +77,12 @@ The 96 KiB RomFS could not be read here: the ticket's RSA-OAEP titlekey decrypts
 console's* `eticket_rsa_keypair`, and neither OAEP-SHA256/SHA1 nor PKCS#1 v1.5 at any block offset of the
 ticket decoded with the local keypair (open question 6.1). **Neither NSP contains the tracks** — the DLC
 distribution model is "update ships the data, DLC title is the license + a small stub".
+
+> **Correction (2026-11-18).** The RomFS is readable. The ticket's title key type byte (`+0x281`) is 0: a *common*
+> ticket. Its title key block (`+0x180`) is a 16-byte key followed by zeros, wrapped with `titlekek_0c` (master key
+> revision 13), not an RSA block for one console, which is why no RSA scheme decoded it. hactool
+> `--titlekey=<those 16 bytes>` decrypts the section. The RomFS (IVFC level 6, 0x1290 bytes) holds two files:
+> `version.txt` (5 bytes: `10002`) and `contents.dat` (4096 bytes, high entropy). The game reads both at boot.
 
 All of the above was decrypted in memory only (no content extracted to disk) with hactool 1.4.0 cross-checked
 byte-for-byte; the crypto notes that matter for later tooling: hactool derives the header key from
@@ -231,6 +249,10 @@ v65536 on top of update v1507328 and the dump's RomFS is the 3.0.x content — c
 Steps 1–5 alone make MK8D's BCP playable-cups-visible (license + mountable storage, no new data). Steps 6–8
 are the general path for DLC that ships real content.
 
+> **Outcome (2026-11-18).** All nine items are done; step 4's probe sent step 5 another way (the files are the
+> title's own, so the installer of step 6 provides them, nothing is synthesized). Where each landed is in
+> [section 7](#7-what-was-built-2026-11-18).
+
 ## 5. Verification
 
 - **Log lines to expect**: `aoc:u` Count answered 1; fsp cmd 202 for `0100152000023001` served (log its size —
@@ -239,6 +261,8 @@ are the general path for DLC that ships real content.
   (e.g. `Cnsw_11`, Paris Promenade) starts and renders. The course data itself is plain RomFS reads —
   identical mechanics to the base courses already proven in `MK8D_BOOT_INVESTIGATION.md`.
 - **Negative test**: delete `dlc.manifest` → Count 0 → BCP cups hidden, game still boots (today's behavior).
+  (As run on 2026-11-18: the game boots as before, but the cups are not hidden. MK8D lists the BCP cups for
+  everyone and answers a non-owner with the purchase notice; see 7.5.)
 - **Regression**: MKW boots as before (it queries neither `aoc:u` nor cmd 202 today); engine tests
   `test_n*.py` stay green; no ABI bump, so a runtime-only redeploy suffices.
 - **Cannot be determined without running** (probe items for step 4): whether MK8D calls `PrepareAddOnContent`
@@ -266,3 +290,115 @@ are the general path for DLC that ships real content.
    synthesized stub won't survive; that's what step 4's probe decides before step 6 is built.
 6. **Multi-DLC games** (future): the manifest design already lists several entries; ListAddOnContent ordering
    (by id_offset, per Eglantine's record order) should be kept stable so games index them predictably.
+
+> **Outcome (2026-11-18).** 1: wrong, the ticket is a common one and the RomFS decrypts (correction in 1.3). 2: nothing
+> bit; `aoc:u` and the data storage are all MK8D asks for. 3: the save was backed up before the runs and restored
+> after them. 4: `dlc.py` reads PFS0 tables at 0x10 and a test pins it. 5: confirmed the hard way, a stub hangs the
+> game, so a title is installed with its data or not at all. 6: the manifest and the List answer are sorted by title
+> id; a package with several titles is covered by a test, no real multi-DLC game was tried.
+
+## 7. What was built (2026-11-18)
+
+### 7.1 In the launcher
+
+- **Game → Install DLC…** (`window.cpp`): a file picker for `*.nsp *.nsz *.xci *.xcz *.nca`, several files at once,
+  for the selected game. Each file's type and signature are checked (`validDlcPackage`), the paths join
+  `Game.dlc` in `library.json` (an array of absolute paths, as in 3.2), and the engine installs them into the build's
+  data folder. What the engine refuses comes back as a message with the reason and leaves the list again.
+- **Properties → DLC** (`dlcpanel.cpp`): one row per package with the title ids and versions installed from it
+  (`Booster Course [...].nsp — 0100152000023001 v65536`). Right-click → **Remove** or Delete; **OK** applies it and
+  the engine deletes the title from the data folder.
+- **When the data folder is written**: right after Install DLC… for a built game, after every successful build, and
+  before **Play** whenever the folder does not hold exactly the listed packages (`dlcUpToDate`). All three run the
+  same engine command, `switchrecomp.py --sync-dlc <packages> --datadir <build>/<name>_data` (`DlcInstaller` in
+  `buildmanager.cpp`); its output goes to the build console.
+- DLC found in the data folder but missing from `Game.dlc` (installed from the command line, or the library file
+  was written by an older launcher since) is added to the list when Properties or Play looks at the game.
+- `RecompLauncher --select-title <game> --install-dlc <package>` is the menu action without its dialogs (exit code
+  0 or 1); `--show-menu game` and `--show-properties --properties-tab 4` with `--screenshot` show the new UI.
+- Releases ship the engine's `dlc.py` (`scripts/package-release.py`).
+
+### 7.2 In the engine
+
+Reference: `third_party/Switch2RECOMP/docs/DLC.md`.
+
+- `dlc.py` and `switchrecomp.py --install-dlc / --remove-dlc / --sync-dlc / --list-dlc --datadir <data>`.
+- `runtime/dlc.c`: the manifest, the `aoc:u` Count / List answers (`svc_core.c`), and the title storages behind
+  fsp-srv 202 (`svc_fs.c`). No ABI change.
+- Differences from the plan in section 3:
+  - The manifest line has a storage word: `<title id> <version> <data|stub> <package>` (the three-column form is
+    still read).
+  - The title's RomFS is stored as an **image**, `dlc/<title id>/romfs.bin` (exactly the bytes the game would get),
+    not as an extracted folder. A plaintext RomFS is not copied at all: `dlc/<title id>/romfs.nsp` is a marker and
+    the runtime reads the range from the package, like a game's own `romfs.nsp`. A hand-filled
+    `dlc/<title id>/romfs/` folder is served too.
+  - No stub: a package whose data cannot be read is refused with the reason. The runtime still understands a
+    `stub` line (an empty RomFS) and `--dlc-stub` writes one, for diagnostics only.
+  - The engine writes the manifest, not the launcher; the launcher only passes the package list.
+
+### 7.3 Formats, against Eglantine's list
+
+Eglantine's "Install Files to NAND" filter is `*.nca *.nsp *.nsz *.xci *.xcz` (`yuzu/main_window.cpp`
+`OnMenuInstallToNAND`); its external content scan takes `nsp nsz xcz xci`.
+
+| Format | Eglantine | Here |
+|---|---|---|
+| `.nsp` | yes | yes: title-key (common ticket), key-area and plaintext data NCAs |
+| `.nsp` holding game + update + DLC (1.1) | yes | yes: only the add-on titles are installed (verified with the 11.3 GiB 1G+1U+1D package) |
+| `.nsz` | yes (block and, for install, solid NCZ) | yes: block and solid NCZ, decompressed with the Python the engine already uses for NUP (3.14, `backports.zstd` or `zstandard`) |
+| `.xci` | yes | yes: the secure partition, with or without the dump's key area |
+| `.xcz` | yes | yes |
+| `.nca` | yes (asks for the title type) | yes for an add-on Data NCA; with a rights id it needs `<rights id>.tik` beside it |
+
+Not installable anywhere, and refused here with the reason instead of being accepted: a ticket personalized for
+another console, data whose ticket is missing, keys without the content's key generation. On Linux the engine needs
+`hactool` on the PATH, as for NSP builds. Only the two real MK8D packages were available as real data; NSZ, XCI,
+XCZ and bare NCA are covered by synthetic packages in the engine tests.
+
+### 7.4 What Mario Kart 8 Deluxe does
+
+At 3.4 s, before the title screen (log of the final run):
+
+```
+dlc: 1 add-on content title in ...Mario Kart 8 Deluxe 1G1U1D_data/dlc.manifest
+aoc: ListAddOnContent offset 0 count 16 -> 1
+aoc: PrepareAddOnContent 1
+fs: add-on content 0100152000023001 (image, 4.6 KB)        (mounted twice)
+dlc: 0100152000023001 read 0 +50                           RomFS header
+dlc: 0100152000023001 read 1208 +c ... 1238 +58            directory and file tables
+dlc: 0100152000023001 read 1200 +5                         version.txt
+dlc: 0100152000023001 read 200 +1000                       contents.dat
+```
+
+So the answers to section 5's "cannot be determined without running": the game does call `PrepareAddOnContent`
+(index 1) before mounting; it wants `version.txt` and `contents.dat`; no `es` or purchase backend was needed.
+
+### 7.5 Verification
+
+Real library, real build folder (`.../SwitchRecomp Builds/Mario Kart 8 Deluxe 1G1U1D`), harness
+`tools/plza_probe.py`. The game was rebuilt through the CLI with the launcher's arguments first (the game's exe hash
+equals the engine's `bin/runtime_win64_win32.exe`), the save was backed up before and restored after.
+
+| Run (`D:/Projects/Switch2RECOMP-main/build/evidence/dlc/`) | Data folder | Result |
+|---|---|---|
+| `20261118-010020-mk8d-no-dlc` | no manifest (the negative test) | boots as before, `ListAddOnContent ... -> 0`, main menu without the shop check mark (`0004`). The second cup page lists the 12 BCP cups for everyone (`0012`), but Golden Dash Cup answers "You can play the new cups by purchasing the Booster Course Pass..." (`0013`) and returns to cup select |
+| `20261118-002506-mk8d-dlc-stub` | title listed, empty RomFS | title screen, then L+R: loading screen for a minute until the run was stopped |
+| `20261118-002837-mk8d-dlc-folder` | first probe with the real files (a hand-filled `romfs/` folder) | menus, BCP page, Golden Dash Cup, Paris Promenade driven |
+| `20261118-010258-mk8d-dlc-bcp` | **installed by the launcher** from the standalone NSP (`romfs.bin`) | main menu with the shop check mark (`0002`), cup select (`0010`), "Start Grand Prix?" for Golden Dash Cup (`0011`), Paris Promenade (`Course/Cnsw_11`) driven, 3rd under the Eiffel Tower (`0014`, `0015`), 56 FPS over the run, no crash |
+
+- The combined 1G+1U+1D package installs the same title through the CLI (`--install-dlc`), 4.6 KB image, and the
+  same file again is reported as already installed.
+- Launcher UI (own instance, real library): `launcher/game-menu.png` (Game menu with Install DLC…),
+  `launcher/properties-dlc.png` (Properties → DLC listing the Booster Course package).
+- Regression: Mario Kart World rebuilt through the CLI with the same runtime and run to its menus; it makes no
+  `aoc:u` or data storage call.
+- Tests: launcher `launcher-tests` and `launcher-ui-tests` (the DLC list in `library.json`, the manifest reader,
+  package checks, the installer process, the Game menu, the Properties list); engine `tests/test_nsp_dlc.py`
+  (20 cases, section 6 of the engine's `docs/DLC.md`) inside `unittest discover -s tests -p "test_n*.py"` (37 OK).
+
+### 7.6 Open
+
+- The title screen shows "Ver. 1.0.0": the runtime's display version, unrelated to DLC.
+- BKTR and AES-XTS data sections are refused; no add-on content with either was seen.
+- Building a game straight from a combined NSP (game + update in one file) is not supported: the update is a BKTR
+  patch. Build from an extracted dump or the base package, then install the DLC from the combined file.

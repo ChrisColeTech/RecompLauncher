@@ -63,5 +63,5 @@ void DlcPanel::refresh() {
     else
         note->setText(QString(locked ? "DLC cannot be changed while the game is running or building."
                                      : "Right-click an entry and choose Remove (or press Delete) to uninstall it; it takes effect "
-                                       "when you click OK. Add more with Game > Install DLC…. The original files are never changed."));
+                                       "when you click OK. The original files are never changed. Add more with Game > Install DLC…"));
 }
