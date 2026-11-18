@@ -118,6 +118,10 @@ bool adoptPackageDlc(Game& game, const QString& builtBefore);
 // --install-dlc / --sync-dlc: <data>/dlc.manifest plus <data>/dlc/<title id>/); the launcher keeps the list of
 // packages in Game::dlc and has the engine bring the data folder in line after a build and before Play.
 inline constexpr auto updateFileFilter = "Game updates (*.nsp *.xci *.nca);;All files (*)";
+// The build on disk was made with an update of its own package (its romfs.nsp names it) but the library does not
+// say so (an imported build, or a library file written since by a launcher from before updates): the update joins
+// the list and counts as built. Returns true when the game changed.
+bool adoptBuiltUpdate(Game& game);
 // A quick look at the file itself before the engine is asked: a type an update can be read from in place.
 bool validUpdatePackage(const QString& path, QString* error);
 // The engine arguments that say what the update packages are and check them against the game's source.

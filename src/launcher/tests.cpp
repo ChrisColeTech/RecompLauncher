@@ -356,6 +356,13 @@ private slots:
         Game game; QString error; QVERIFY2(gameFromExecutable(built.executable(),&game,&error),qPrintable(error));
         QVERIFY(samePath(game.source,source)); QCOMPARE(game.updates.size(),1); QVERIFY(samePath(game.updates[0].path,update));
         QVERIFY(samePath(game.builtUpdate,update)); QVERIFY(game.hasBuild()); QVERIFY(!game.updatePending());
+        // the same when an older launcher has saved the library since and dropped what it did not know
+        const QString file=tmp.filePath("library.json"); game.id="g1"; game.title="Game";
+        QJsonObject entry=game.json(); entry.remove("updates"); entry.remove("updateChoice"); entry.remove("builtUpdate");
+        writeFile(file,QJsonDocument(QJsonObject{{"schema",1},{"games",QJsonArray{entry}}}).toJson());
+        Library library(file); QVERIFY(library.load(&error)); QCOMPARE(library.games.size(),1);
+        QCOMPARE(library.games[0].updates.size(),1); QVERIFY(samePath(library.games[0].builtUpdate,update)); QVERIFY(library.games[0].hasBuild());
+        Game untouched=library.games[0]; QVERIFY(!adoptBuiltUpdate(untouched));
     }
     void updateProbeAsksTheEngine() {
         // this test binary stands in for Python + the engine: see main() below

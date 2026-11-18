@@ -281,6 +281,7 @@ bool Library::load(QString* error) {
     games.clear();
     for (const auto& value : o["games"].toArray()) {
         auto game = Game::fromJson(value.toObject());
+        adoptBuiltUpdate(game);   // a library written by a launcher from before updates: the build on disk says what it has
         if (!game.id.isEmpty() && !game.title.isEmpty() && !find(game.id)) games.append(game);
     }
     return true;
@@ -352,6 +353,22 @@ bool samePath(const QString& left,const QString& right){
 #else
     return normalized(left)==normalized(right);
 #endif
+}
+bool adoptBuiltUpdate(Game& game) {
+    if (!game.builtUpdate.isEmpty() || game.buildDir.isEmpty() || game.outputName.isEmpty()) return false;
+    QFile marker(QDir(game.dataDir()).filePath("romfs.nsp"));
+    if (!marker.open(QIODevice::ReadOnly) || marker.readLine().trimmed() != "SWRNSP2") return false;
+    while (!marker.atEnd()) {
+        const QString row = QString::fromUtf8(marker.readLine()).trimmed();
+        if (!row.startsWith("update ")) continue;
+        const QString path = QDir::fromNativeSeparators(row.mid(7).trimmed());
+        bool known = false;
+        for (const auto& update : game.updates) known = known || samePath(update.path, path);
+        if (!known) { GameUpdate update; update.path = path; update.display = game.version(); game.updates.append(update); }
+        game.builtUpdate = path;
+        return true;
+    }
+    return false;
 }
 bool validUpdatePackage(const QString& path, QString* error) {
     const QFileInfo info(path);
@@ -517,16 +534,9 @@ bool gameFromExecutable(const QString& path, Game* game, QString* error) {
     if (g.source.isEmpty()) {
         QFile nspMarker(QDir(g.dataDir()).filePath("romfs.nsp"));
         // SWRNSP2: an encrypted package, or one that holds the game with its update; the package path is line 2 in both
-        if (nspMarker.open(QIODevice::ReadOnly) && QByteArrayList{"SWRNSP1", "SWRNSP2"}.contains(nspMarker.readLine().trimmed())) {
+        if (nspMarker.open(QIODevice::ReadOnly) && QByteArrayList{"SWRNSP1", "SWRNSP2"}.contains(nspMarker.readLine().trimmed()))
             g.source = QString::fromUtf8(nspMarker.readLine()).trimmed();
-            // a build with an update of its own package (docs/UPDATES_IN_PLACE.md): the update joins the game's list
-            while (!nspMarker.atEnd()) {
-                const QString row = QString::fromUtf8(nspMarker.readLine()).trimmed();
-                if (!row.startsWith("update ")) continue;
-                GameUpdate update; update.path = QDir::fromNativeSeparators(row.mid(7).trimmed()); update.display = g.version();
-                g.updates = {update}; g.builtUpdate = update.path;
-            }
-        }
+        adoptBuiltUpdate(g);   // a build with an update of its own package brings the update along
     }
     g.builtSource = g.source; g.renderer = readRenderer(g.iniPath());
     for (const auto& name : {"icon.jpg", "icon.png", "icon_AmericanEnglish.dat"}) {
