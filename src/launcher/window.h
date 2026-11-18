@@ -9,6 +9,7 @@
 class LibraryCanvas;
 class GameCard;
 class FilterPopup;
+class DlcDialog;
 class QFrame;
 class QMenuBar;
 class TitleBar;
@@ -40,9 +41,12 @@ public:
     void showAppearance();
     void showControllerSettings();
     void showMenu(const QString& name);   // pops a menu of the title bar open by its name ("Game")
-    // Game > Install DLC… without the file dialog: adds the packages to the selected game and installs them into its
-    // build. Not interactive (--install-dlc): no message boxes, the outcome arrives with dlcFinished.
+    // Add DLC… of the DLC window without its file dialog: adds the packages to the selected game and installs them
+    // into its build. Not interactive (--install-dlc): no message boxes, the outcome arrives with dlcFinished.
     bool installDlcPackages(const QStringList& files, bool interactive = true);
+    // Remove of the DLC window for the selected game, without message boxes (--remove-dlc): dlcFinished reports.
+    void removeDlc(const QStringList& packages);
+    void showDlc() { installDlc(); }     // Game > Install DLC…: the game's DLC window
 signals:
     void smokeFinished(bool success);
     void dlcFinished(bool success, const QString& detail);
@@ -77,6 +81,8 @@ private:
     void installDlc();
     enum DlcReason { DlcInstalled, DlcBuilt, DlcPlay, DlcChanged };
     bool startDlcSync(const QString& id, DlcReason reason);
+    void removeDlcPackages(const QString& id, const QStringList& packages);
+    void dlcReport(const QString& title, const QString& text, bool error);
     void showContextMenu(const QPoint& global);
     void showToolPopup();
     void message(const QString& title, const QString& text, bool error = false);
@@ -111,6 +117,7 @@ private:
     QPlainTextEdit* console = nullptr;
     QProgressBar* progress = nullptr;
     QPointer<QFrame> toolPopup;
+    QPointer<DlcDialog> dlcDialog;
     QString buildPhase;
     int buildCurrent = 0, buildTotal = 0;
     QAction *addAction = nullptr, *addFolderAction = nullptr, *importAction = nullptr, *playAction = nullptr,

@@ -13,6 +13,7 @@
 #include <QLineEdit>
 #include <QListWidget>
 #include <QMenu>
+#include <QProgressBar>
 #include <QTemporaryDir>
 #include <QPushButton>
 #include <QToolButton>
@@ -96,6 +97,49 @@ private slots:
         panel.removeRow(0);QVERIFY(panel.packages().isEmpty());
         // a running or building game: the list shows, nothing can be removed
         DlcPanel locked(game,true);locked.removeRow(0);QCOMPARE(locked.packages(),game.dlc);QVERIFY(locked.note->text().contains("cannot be changed"));
+    }
+    void dlcWindowAddsAndRemovesSeveral(){
+        QTemporaryDir tmp;Game game;game.id="g";game.title="Kart";game.outputName="Kart";game.buildDir=tmp.filePath("build");
+        QDir().mkpath(game.dataDir());
+        for(const auto& path:{game.executable(),game.codeModule()}){QFile f(path);QVERIFY(f.open(QIODevice::WriteOnly));f.write("fixture");}
+        const QString first=tmp.filePath("First.nsp"),second=tmp.filePath("Second.nsz"),third=tmp.filePath("Third.xci"),more=tmp.filePath("More.nsp"),other=tmp.filePath("Other.nca");
+        for(const auto& path:{first,second,third}){QFile f(path);QVERIFY(f.open(QIODevice::WriteOnly));f.write("PFS0");}
+        {QFile f(game.dataDir()+"/dlc.manifest");QVERIFY(f.open(QIODevice::WriteOnly));
+         f.write(("0100152000023001 65536 data "+first+"\n0100152000023002 3 data "+second+"\n0100152000023003 1 data "+second+"\n").toUtf8());}
+        game.dlc={first,second,third};
+        DlcDialog dialog(game,false);
+        QCOMPARE(dialog.windowTitle(),QString("DLC — Kart"));
+        QCOMPARE(dialog.list->count(),3);
+        QCOMPARE(dialog.list->item(1)->text(),QString("Second.nsz — 0100152000023002 v3, 0100152000023003 v1"));   // one package, two titles
+        QCOMPARE(dialog.list->item(2)->text(),QString("Third.xci — not installed yet"));
+        QVERIFY(dialog.addButton->isEnabled());QVERIFY(!dialog.removeButton->isEnabled());                      // nothing selected yet
+        QSignalSpy removed(&dialog,&DlcDialog::removeRequested),added(&dialog,&DlcDialog::addRequested);
+        // two entries selected, one click: both are asked to go
+        dialog.list->item(0)->setSelected(true);dialog.list->item(2)->setSelected(true);QVERIFY(dialog.removeButton->isEnabled());
+        QTest::mouseClick(dialog.removeButton,Qt::LeftButton);
+        QCOMPARE(removed.count(),1);QCOMPARE(removed[0][0].toStringList(),QStringList({first,third}));
+        QCOMPARE(dialog.list->count(),3);                                                                         // the window only asks
+        game.dlc={second};dialog.setGame(game);                                                                   // the main window's answer
+        QCOMPARE(dialog.list->count(),1);QVERIFY(!dialog.removeButton->isEnabled());
+        dialog.list->item(0)->setSelected(true);dialog.list->setFocus();dialog.show();QVERIFY(QTest::qWaitForWindowExposed(&dialog));
+        QTest::keyClick(dialog.list,Qt::Key_Delete);QCOMPARE(removed.count(),2);QCOMPARE(removed[1][0].toStringList(),QStringList(second));
+        // several packages in one go (the picker and a drop both end in addFiles)
+        dialog.addFiles({more,other});QCOMPARE(added.count(),1);QCOMPARE(added[0][0].toStringList(),QStringList({more,other}));
+        dialog.addFiles({});QCOMPARE(added.count(),1);
+        // while the engine runs nothing else can be started, and the outcome shows under the list
+        dialog.setBusy(true,"Installing…");QVERIFY(!dialog.addButton->isEnabled());QVERIFY(!dialog.removeButton->isEnabled());QVERIFY(!dialog.progress->isHidden());
+        QCOMPARE(dialog.status->text(),QString("Installing…"));
+        dialog.addFiles({more});dialog.removeSelected();QCOMPARE(added.count(),1);QCOMPARE(removed.count(),2);
+        dialog.setBusy(false);QVERIFY(dialog.addButton->isEnabled());QVERIFY(dialog.progress->isHidden());
+        dialog.setStatus("More.nsp: the ticket is bound to one console",true);
+        QCOMPARE(dialog.status->text(),QString("More.nsp: the ticket is bound to one console"));QVERIFY(dialog.status->property("error").toBool());QVERIFY(!dialog.status->isHidden());
+        dialog.setStatus("Installed: 0100152000023001 v65536.");QVERIFY(!dialog.status->property("error").toBool());
+        game.dlc.clear();dialog.setGame(game);QVERIFY(dialog.hint->text().contains("Add DLC…"));QVERIFY(dialog.hint->text().contains("several at once"));
+        // a running or building game: the list shows, nothing can be changed
+        game.dlc={first};DlcDialog locked(game,true);locked.list->item(0)->setSelected(true);
+        QVERIFY(!locked.addButton->isEnabled());QVERIFY(!locked.removeButton->isEnabled());
+        QSignalSpy lockedRemoved(&locked,&DlcDialog::removeRequested);locked.removeSelected();locked.addFiles({more});QCOMPARE(lockedRemoved.count(),0);
+        QVERIFY(locked.hint->text().contains("cannot be changed"));
     }
     void escapeClosesPopup(){
         QWidget owner;QPushButton anchor("Find games",&owner);owner.resize(400,300);anchor.resize(100,70);owner.show();

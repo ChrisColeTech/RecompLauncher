@@ -166,23 +166,24 @@ Window::Window(const QString& file,const QString& root,bool isDemo):library(file
     connect(&dlcInstaller,&DlcInstaller::output,console,&QPlainTextEdit::appendPlainText);
     connect(&dlcInstaller,&DlcInstaller::finished,this,[this](const QString& id,bool,const QStringList& errors){
         progress->hide();
-        auto* game=library.find(id);if(!game){jobLabel->clear();refreshLibrary();return;}
+        auto* game=library.find(id);if(!game){jobLabel->clear();if(dlcDialog)dlcDialog->setBusy(false);refreshLibrary();return;}
         // what the data folder holds now is the truth: a package the engine refused leaves the list
         const auto installed=readDlcManifest(game->dataDir());
         QStringList kept,titles;
         for(const auto& package:game->dlc){bool found=false;for(const auto& title:installed)found=found||samePath(title.source,package);if(found)kept<<package;}
         for(const auto& title:installed)titles<<title.titleId.toUpper()+(title.version?QString(" v%1").arg(title.version):QString{});
         game->dlc=kept;save();refreshLibrary();
-        const bool quiet=dlcQuiet;dlcQuiet=false;
-        if(!errors.isEmpty()){
-            jobLabel->setText("DLC was not installed — see the message");
-            if(quiet)emit dlcFinished(false,errors.join("\n"));else message("DLC could not be installed",errors.join("\n\n"),true);
-            return;
-        }
+        if(dlcDialog){dlcDialog->setBusy(false);dlcDialog->setGame(*game);}
+        if(!errors.isEmpty()){jobLabel->setText("DLC was not installed — see the message");dlcReport("DLC could not be installed",errors.join("\n\n"),true);return;}
         jobLabel->setText(installed.isEmpty()?"DLC removed":QString("DLC installed — %1 title%2").arg(installed.size()).arg(installed.size()==1?"":"s"));
-        if(quiet){emit dlcFinished(true,titles.join("\n"));return;}
         if(dlcReason==DlcInstalled&&!installed.isEmpty())
-            message("DLC installed",game->title+" now has this add-on content:\n\n"+titles.join("\n")+"\n\nIt is in effect the next time you play. Game > Properties > DLC lists it and removes it.");
+            dlcReport("DLC installed",dlcDialog||dlcQuiet?"Installed: "+titles.join(", ")+". It is in effect the next time you play."
+                :game->title+" now has this add-on content:\n\n"+titles.join("\n")+"\n\nIt is in effect the next time you play. Game > Install DLC… lists it and removes it.",false);
+        else if(dlcReason==DlcChanged&&dlcDialog)
+            dlcDialog->setStatus(installed.isEmpty()?"Removed. No DLC is installed now; the original files were not changed."
+                :"Removed. Still installed: "+titles.join(", ")+". The original files were not changed.");
+        else if(dlcQuiet)dlcReport({},installed.isEmpty()?QString("No DLC is installed now."):"Installed: "+titles.join(", "),false);
+        dlcQuiet=false;
         if(dlcReason==DlcPlay&&dlcUpToDate(*game)){selectGame(id);play();}
     });
     new QShortcut(QKeySequence("Ctrl+F"),this,[this]{showFilters();});
@@ -224,7 +225,7 @@ void Window::createActions(){
     logAction=make("View game log","log","Open the runtime log");connect(logAction,&QAction::triggered,this,[this]{openGameFile(".log");});
     removeAction=new QAction("Remove from library…",this);connect(removeAction,&QAction::triggered,this,&Window::removeGame);
     installDlcAction=new QAction("Install DLC…",this);installDlcAction->setObjectName("InstallDlc");
-    installDlcAction->setToolTip("Install add-on content for the selected game (NSP, NSZ, XCI, XCZ, NCA)");connect(installDlcAction,&QAction::triggered,this,&Window::installDlc);
+    installDlcAction->setToolTip("Install or remove add-on content for the selected game (NSP, NSZ, XCI, XCZ, NCA)");connect(installDlcAction,&QAction::triggered,this,&Window::installDlc);
     auto* group=new QActionGroup(this);group->setExclusive(true);
     galleryAction=make("Gallery","grid","Cover gallery");tableAction=make("List","list","Sortable details list");
     for(auto* a:{galleryAction,tableAction}){a->setCheckable(true);group->addAction(a);}
@@ -379,7 +380,7 @@ void Window::refreshSelection(){
     buildAction->setEnabled(exists&&!demo&&!builder.busy()&&!playing&&g->sourceAvailable()&&tools.canBuild()&&!g->hasBuild());
     stopAction->setEnabled(building||playing);stopAction->setText(building?"Cancel build":"Stop");
     propertiesAction->setEnabled(exists);buildOptionsAction->setEnabled(exists&&!playing&&!building);removeAction->setEnabled(exists&&!playing&&!building);
-    installDlcAction->setEnabled(exists&&!demo&&!playing&&!building&&!dlcInstaller.busy());
+    installDlcAction->setEnabled(exists&&!demo);   // the DLC window opens read-only for a game that is running or building
     folderAction->setEnabled(exists);saveFolderAction->setEnabled(exists&&g->hasBuild());logAction->setEnabled(exists&&QFileInfo(QDir(g->buildDir).filePath(g->outputName+".log")).exists());
     const QString info=g?g->title+" · "+g->format()+" · "+g->renderer:"No selection";
     selectionLabel->setText(fontMetrics().elidedText(info,Qt::ElideRight,390));selectionLabel->setToolTip(g?info+"\n"+displayPath(g->source):info);
@@ -400,20 +401,30 @@ void Window::showMenu(const QString& name){
 }
 // Game > Install DLC…: the packages join the game's list; a built game gets them installed right away (the engine
 // reads the package and refuses, with the reason, what it cannot install), an unbuilt one when its build finishes.
+// Where the outcome of a DLC action goes: the DLC window when it is open, the caller of --install-dlc when there is
+// no one to click a message box, a message box otherwise.
+void Window::dlcReport(const QString& title,const QString& text,bool error){
+    if(dlcDialog)dlcDialog->setStatus(text,error);
+    else if(dlcQuiet){dlcQuiet=false;emit dlcFinished(!error,text);}
+    else message(title,text,error);
+}
+// Game > Install DLC…: the game's DLC window. Add DLC… and Remove work on the list (Game.dlc in library.json) and on
+// the build's data folder right away; an unbuilt game keeps the list and gets the DLC when its build finishes.
 void Window::installDlc(){
     auto* game=selected();if(!game||demo)return;
     const QString id=game->id;
-    if(running.contains(id)||(builder.busy()&&builder.gameId()==id)||dlcInstaller.busy()){message("Game is busy","Wait for this game's build, run or DLC installation to finish first.");return;}
-    const QString start=game->dlc.isEmpty()?QFileInfo(game->source).absolutePath():QFileInfo(game->dlc.last()).absolutePath();
-    const auto files=QFileDialog::getOpenFileNames(this,"Install DLC — "+game->title,start,dlcFileFilter);
-    if(!files.isEmpty())installDlcPackages(files);
+    if(adoptInstalledDlc(*game))save();
+    DlcDialog dialog(*game,running.contains(id)||(builder.busy()&&builder.gameId()==id),this);dlcDialog=&dialog;
+    if(dlcInstaller.busy())dialog.setBusy(true,"A DLC installation is running…");
+    connect(&dialog,&DlcDialog::addRequested,this,[this](const QStringList& files){installDlcPackages(files);});
+    connect(&dialog,&DlcDialog::removeRequested,this,[this,id](const QStringList& packages){removeDlcPackages(id,packages);});
+    dialog.exec();dlcDialog=nullptr;refreshSelection();
 }
 bool Window::installDlcPackages(const QStringList& files,bool interactive){
-    // not interactive: the reason goes to dlcFinished instead of a message box
-    const auto say=[this,interactive](const QString& title,const QString& text,bool error){if(interactive)message(title,text,error);else emit dlcFinished(!error,text);};
-    auto* game=selected();if(!game||demo){say("Cannot install DLC","Select a game first.",true);return false;}
+    dlcQuiet=!interactive&&!dlcDialog;
+    auto* game=selected();if(!game||demo){dlcReport("Cannot install DLC","Select a game first.",true);return false;}
     const QString id=game->id;
-    if(running.contains(id)||(builder.busy()&&builder.gameId()==id)||dlcInstaller.busy()){say("Game is busy","Wait for this game's build, run or DLC installation to finish first.",true);return false;}
+    if(running.contains(id)||(builder.busy()&&builder.gameId()==id)||dlcInstaller.busy()){dlcReport("Game is busy","Wait for this game's build, run or DLC installation to finish first.",true);return false;}
     if(adoptInstalledDlc(*game))save();
     QStringList added,problems;
     for(const auto& file:files){
@@ -422,19 +433,47 @@ bool Window::installDlcPackages(const QStringList& files,bool interactive){
         if(known)continue;
         if(validDlcPackage(path,&error))added<<path;else problems<<error;
     }
-    if(!problems.isEmpty()){say("Cannot install DLC",problems.join("\n"),true);if(!interactive)return false;}
-    if(added.isEmpty()){if(problems.isEmpty())say("DLC already installed","Those packages are already in this game's DLC list (Properties > DLC).",false);return problems.isEmpty();}
-    game->dlc+=added;save();
-    if(!game->hasBuild()){say("DLC added",QString("%1 package%2 added. The DLC is installed when %3 is built.").arg(added.size()).arg(added.size()==1?"":"s").arg(game->title),false);return true;}
-    dlcQuiet=!interactive;
-    if(startDlcSync(id,DlcInstalled))return true;
-    game=library.find(id);if(game){for(const auto& path:added)game->dlc.removeAll(path);save();}
+    if(added.isEmpty()){
+        if(problems.isEmpty())dlcReport("DLC already installed","Those packages are already in this game's DLC list.",false);
+        else dlcReport("Cannot install DLC",problems.join("\n"),true);
+        return problems.isEmpty();
+    }
+    if(!problems.isEmpty()&&dlcQuiet){dlcReport("Cannot install DLC",problems.join("\n"),true);return false;}   // all or nothing from the command line
+    game->dlc+=added;save();if(dlcDialog)dlcDialog->setGame(*game);
+    if(!game->hasBuild()){
+        dlcReport("DLC added",problems.join("\n")+(problems.isEmpty()?"":"\n\n")+QString("%1 package%2 added. The DLC is installed when %3 is built.").arg(added.size()).arg(added.size()==1?"":"s").arg(game->title),!problems.isEmpty());
+        return true;
+    }
+    if(startDlcSync(id,DlcInstalled)){
+        // the files that were not packages at all are reported now; the engine's verdict on the others follows
+        if(!problems.isEmpty()){if(dlcDialog)dlcDialog->setStatus(problems.join("\n"),true);else message("Cannot install DLC",problems.join("\n"),true);}
+        return true;
+    }
+    game=library.find(id);if(game){for(const auto& path:added)game->dlc.removeAll(path);save();if(dlcDialog)dlcDialog->setGame(*game);}
     return false;
+}
+void Window::removeDlc(const QStringList& packages){
+    dlcQuiet=!dlcDialog;
+    auto* game=selected();if(!game||demo){dlcReport("Cannot remove DLC","Select a game first.",true);return;}
+    if(adoptInstalledDlc(*game))save();
+    removeDlcPackages(game->id,packages);
+}
+// Remove in the DLC window: the packages leave the list and, for a built game, its data folder.
+void Window::removeDlcPackages(const QString& id,const QStringList& packages){
+    auto* game=library.find(id);if(!game)return;
+    if(running.contains(id)||(builder.busy()&&builder.gameId()==id)||dlcInstaller.busy()){dlcReport("Game is busy","Wait for this game's build, run or DLC installation to finish first.",true);return;}
+    int removed=0;
+    for(const auto& package:packages)for(int i=game->dlc.size()-1;i>=0;--i)if(samePath(game->dlc[i],package)){game->dlc.removeAt(i);++removed;}
+    if(!removed){dlcReport("DLC not installed","That package is not in this game's DLC list.",true);return;}
+    save();if(dlcDialog)dlcDialog->setGame(*game);
+    if(game->hasBuild()){if(!startDlcSync(id,DlcChanged)&&dlcDialog){game=library.find(id);if(game){adoptInstalledDlc(*game);save();dlcDialog->setGame(*game);}}}
+    else dlcReport("DLC removed",QString("%1 package%2 taken off the list. The original files were not changed.").arg(removed).arg(removed==1?"":"s"),false);
 }
 bool Window::startDlcSync(const QString& id,DlcReason reason){
     const auto* game=library.find(id);if(!game)return false;
-    QString error;if(!dlcInstaller.start(*game,tools,&error)){const bool quiet=dlcQuiet;dlcQuiet=false;if(quiet)emit dlcFinished(false,error);else message("Cannot install DLC",error,true);return false;}
-    dlcReason=reason;jobLabel->setText(game->dlc.isEmpty()?"Removing DLC…":"Installing DLC…");progress->setVisible(true);progress->setRange(0,0);
+    QString error;if(!dlcInstaller.start(*game,tools,&error)){dlcReport("Cannot install DLC",error,true);return false;}
+    dlcReason=reason;jobLabel->setText(game->dlc.isEmpty()||reason==DlcChanged?"Updating DLC…":"Installing DLC…");progress->setVisible(true);progress->setRange(0,0);
+    if(dlcDialog)dlcDialog->setBusy(true,reason==DlcChanged?"Removing…":"Installing… a large package can take a while.");
     console->appendPlainText("\nDLC: "+game->title);refreshSelection();return true;
 }
 void Window::showFilters(){if(filters&&filterAnchor)filters->openBelow(filterAnchor);}

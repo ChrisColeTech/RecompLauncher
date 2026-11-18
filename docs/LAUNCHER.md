@@ -35,19 +35,29 @@ only the EXE. The engine is found by walking up from the launcher's directory un
 
 ### DLC (add-on content)
 
-Select the game and choose **Game → Install DLC…**. The picker offers `*.nsp *.nsz *.xci *.xcz *.nca`; several files
-can be chosen at once, and an NSP that holds the game, its update and its DLC together is fine (only the add-on
-titles are taken). The launcher checks each file's type and signature, adds it to the game's DLC list
-(`Game.dlc` in `library.json`) and has the engine install it into the build's data folder
-(`switchrecomp.py --sync-dlc … --datadir <build>/<name>_data`); the engine's output goes to the build console.
-What the engine refuses (a ticket tied to another console, keys without the content's generation, DLC of another
-game, a package without DLC) is shown with its reason and leaves the list again. `prod.keys` is required
-(**Keys → Install keys**).
+Select the game and choose **Game → Install DLC…**. The game's **DLC window** opens: one row per installed package
+with the title ids and versions installed from it, and three buttons.
+
+- **Add DLC…** opens a picker for `*.nsp *.nsz *.xci *.xcz *.nca`. Any number of files can be chosen at once (or
+  dropped on the window), and an NSP that holds the game, its update and its DLC together is fine (only the add-on
+  titles are taken). The launcher checks each file's type and signature, adds it to the game's DLC list
+  (`Game.dlc` in `library.json`) and has the engine install it into the build's data folder
+  (`switchrecomp.py --sync-dlc … --datadir <build>/<name>_data`); the engine's output goes to the build console.
+  What the engine refuses (a ticket tied to another console, keys without the content's generation, DLC of another
+  game, a package without DLC, a title that another package already provides) is shown under the list with its
+  reason and leaves the list again. `prod.keys` is required (**Keys → Install keys**).
+- **Remove** uninstalls the selected rows (Ctrl or Shift select several; Delete and the context menu do the same):
+  they leave the list and the build's data folder right away. The original files are never changed or deleted.
+- **Close** closes the window; nothing waits for it, every action is applied when it is clicked.
+
+Also:
 
 - A game that is not built yet keeps the list; the DLC is installed when its build finishes.
 - **Play** checks that the data folder holds exactly the listed DLC and installs or removes what differs first.
-- **Properties → DLC** lists each package with the title ids and versions installed from it. Right-click an entry →
-  **Remove** (or Delete); it takes effect on **OK**. The original files are never changed or deleted.
+- **Properties → DLC** shows the same list; an entry removed there (right-click → **Remove**, or Delete) is
+  uninstalled on **OK**.
+- `RecompLauncher --select-title <game> --install-dlc <package>` and `--remove-dlc <package>` (both repeatable) do
+  the window's Add and Remove without any dialog; the exit code is 0 or 1.
 - DLC installed from the command line (`switchrecomp.py --install-dlc`) shows up in the list by itself.
 - On Linux the engine needs `hactool` on the PATH for DLC, as for NSP builds.
 

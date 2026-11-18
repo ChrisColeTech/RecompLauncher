@@ -36,11 +36,16 @@ Everything a build needs ships in the archive: Python, GCC, .NET and the shader 
 
 ### DLC
 
-Select the game, then **Game → Install DLC…** and pick the DLC package: `.nsp`, `.nsz`, `.xci`, `.xcz` or `.nca`
-(a package that holds the game, its update and its DLC together works too). It needs `prod.keys`
-(**Keys → Install keys…**). The DLC is in effect the next time you play; the game's properties → **DLC** lists
-what is installed and removes it (right-click an entry → **Remove**). A package that cannot work, such as one whose
-ticket is tied to another console, is refused with the reason ([details](docs/DLC_IN_PLACE.md)).
+Select the game, then **Game → Install DLC…** to open its DLC window:
+
+- **Add DLC…** (or drop files on the window) installs one or several packages at once: `.nsp`, `.nsz`, `.xci`,
+  `.xcz` or `.nca`. A package that holds the game, its update and its DLC together works too.
+- **Remove** uninstalls the selected entries (select several with Ctrl or Shift). Your original files are never
+  changed.
+
+It needs `prod.keys` (**Keys → Install keys…**). The DLC is in effect the next time you play. A package that cannot
+work, such as one whose ticket is tied to another console, is refused with the reason
+([details](docs/DLC_IN_PLACE.md)).
 
 ## Good to know
 

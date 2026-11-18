@@ -1,6 +1,6 @@
 # Add-On Content (DLC): Install And Run In Place
 
-Status 2026-11-18: **built and shipped** (launcher 0.5.0, engine `turbo` b8f487a and later). **Game → Install DLC…**
+Status 2026-11-18: **built and shipped** (launcher 0.5.0, engine `turbo` 2cdeabd). **Game → Install DLC…**
 installs NSP, NSZ, XCI, XCZ and NCA packages; Mario Kart 8 Deluxe's Booster Course Pass (BCP) plays: with the DLC
 installed Golden Dash Cup starts and Paris Promenade races, without it the same cup shows the purchase notice.
 What was built, what differs from the plan and the verification are in [section 7](#7-what-was-built-2026-11-18);
@@ -301,12 +301,18 @@ are the general path for DLC that ships real content.
 
 ### 7.1 In the launcher
 
-- **Game → Install DLC…** (`window.cpp`): a file picker for `*.nsp *.nsz *.xci *.xcz *.nca`, several files at once,
-  for the selected game. Each file's type and signature are checked (`validDlcPackage`), the paths join
-  `Game.dlc` in `library.json` (an array of absolute paths, as in 3.2), and the engine installs them into the build's
-  data folder. What the engine refuses comes back as a message with the reason and leaves the list again.
-- **Properties → DLC** (`dlcpanel.cpp`): one row per package with the title ids and versions installed from it
-  (`Booster Course [...].nsp — 0100152000023001 v65536`). Right-click → **Remove** or Delete; **OK** applies it and
+- **Game → Install DLC…** opens the selected game's **DLC window** (`DlcDialog` in `dlcpanel.cpp`, wired in
+  `window.cpp`): one row per package with the title ids and versions installed from it
+  (`Booster Course [...].nsp — 0100152000023001 v65536`).
+  - **Add DLC…** (or a drop on the window) takes any number of `*.nsp *.nsz *.xci *.xcz *.nca` files at once. Each
+    file's type and signature are checked (`validDlcPackage`), the paths join `Game.dlc` in `library.json` (an array
+    of absolute paths, as in 3.2), and the engine installs them into the build's data folder. What the engine
+    refuses is shown under the list with its reason and leaves the list again.
+  - **Remove** uninstalls the selected rows, several at once: they leave the list and the data folder right away.
+  - A game with several DLC packages, and a package with several add-on titles, are both handled: every title is
+    installed on its own, and a title that two packages hold stays with the one installed first (the other is
+    refused with that package's name) unless the new one is a newer version.
+- **Properties → DLC** (`DlcPanel`): the same list. Right-click → **Remove** or Delete; **OK** applies it and
   the engine deletes the title from the data folder.
 - **When the data folder is written**: right after Install DLC… for a built game, after every successful build, and
   before **Play** whenever the folder does not hold exactly the listed packages (`dlcUpToDate`). All three run the
@@ -314,8 +320,9 @@ are the general path for DLC that ships real content.
   `buildmanager.cpp`); its output goes to the build console.
 - DLC found in the data folder but missing from `Game.dlc` (installed from the command line, or the library file
   was written by an older launcher since) is added to the list when Properties or Play looks at the game.
-- `RecompLauncher --select-title <game> --install-dlc <package>` is the menu action without its dialogs (exit code
-  0 or 1); `--show-menu game` and `--show-properties --properties-tab 4` with `--screenshot` show the new UI.
+- `RecompLauncher --select-title <game> --install-dlc <package>` and `--remove-dlc <package>` are the window's Add
+  and Remove without dialogs (exit code 0 or 1); `--show-menu game`, `--show-dlc` and
+  `--show-properties --properties-tab 4` with `--screenshot` show the new UI.
 - Releases ship the engine's `dlc.py` (`scripts/package-release.py`).
 
 ### 7.2 In the engine
@@ -335,6 +342,9 @@ Reference: `third_party/Switch2RECOMP/docs/DLC.md`.
   - No stub: a package whose data cannot be read is refused with the reason. The runtime still understands a
     `stub` line (an empty RomFS) and `--dlc-stub` writes one, for diagnostics only.
   - The engine writes the manifest, not the launcher; the launcher only passes the package list.
+  - A title that is in the manifest but whose data is not there when the game starts (the package a marker points
+    to was moved, the image was deleted) is not offered to the game, with a warning in the log, because of what a
+    title without data does to MK8D (7.5).
 
 ### 7.3 Formats, against Eglantine's list
 
@@ -385,6 +395,8 @@ equals the engine's `bin/runtime_win64_win32.exe`), the save was backed up befor
 | `20261118-002506-mk8d-dlc-stub` | title listed, empty RomFS | title screen, then L+R: loading screen for a minute until the run was stopped |
 | `20261118-002837-mk8d-dlc-folder` | first probe with the real files (a hand-filled `romfs/` folder) | menus, BCP page, Golden Dash Cup, Paris Promenade driven |
 | `20261118-010258-mk8d-dlc-bcp` | **installed by the launcher** from the standalone NSP (`romfs.bin`) | main menu with the shop check mark (`0002`), cup select (`0010`), "Start Grand Prix?" for Golden Dash Cup (`0011`), Paris Promenade (`Course/Cnsw_11`) driven, 3rd under the Eiffel Tower (`0014`, `0015`), 56 FPS over the run, no crash |
+| `20261118-011120-mk8d-dlc-data-missing` | the same manifest, `romfs.bin` moved away for the run | log: `dlc: 0100152000023001 is installed but its data is missing ... not offered to the game`, `ListAddOnContent ... -> 0`; L+R goes on to Select a Mii (`0001`) instead of hanging |
+| `20261118-011210-mk8d-dlc-final` | the launcher-installed DLC again, with the runtime as shipped (engine 2cdeabd, the game re-placed through the CLI) | Select a Mii, main menu, Golden Dash Cup, Paris Promenade driven, 2nd place (`0015`), 60 FPS over the run, no crash |
 
 - The combined 1G+1U+1D package installs the same title through the CLI (`--install-dlc`), 4.6 KB image, and the
   same file again is reported as already installed.

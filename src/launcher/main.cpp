@@ -57,6 +57,8 @@ int main(int argc, char** argv) {
     parser.addOption({"show-controller", "Open controller settings"});
     parser.addOption({"properties-tab", "Tab for --show-properties (0 General, 1 Build, 2 Runtime, 3 Artwork, 4 DLC)", "index"});
     parser.addOption({"install-dlc", "Install a DLC package for the --select-title game and exit (repeatable)", "package"});
+    parser.addOption({"remove-dlc", "Remove a DLC package from the --select-title game and exit (repeatable)", "package"});
+    parser.addOption({"show-dlc", "Open the selected game's DLC window (Game > Install DLC…)"});
     parser.addOption({"show-menu", "Open a menu of the title bar (File, Game, Keys, View, Help)", "name"});
     parser.addOption({"screenshot", "Save a launcher preview and exit", "png"});
     parser.addOption({"smoke-build", "Build a synthetic test input and exit (diagnostics)", "input"});
@@ -74,14 +76,18 @@ int main(int argc, char** argv) {
     if(parser.isSet("list-view")) window.setViewMode(1);
     if(parser.isSet("show-console")) window.showBuildOutput();
     if(parser.isSet("show-properties")) QTimer::singleShot(0,&window,[&window,tab=parser.value("properties-tab").toInt()]{window.showProperties(tab);});
-    if(parser.isSet("install-dlc")) {
-        // the menu action without its file dialog and message boxes; the outcome is the exit code and one line per title or reason
+    if(parser.isSet("install-dlc")||parser.isSet("remove-dlc")) {
+        // the DLC window's Add and Remove without dialogs and message boxes; the outcome is the exit code and one line per title or reason
         QObject::connect(&window,&Window::dlcFinished,&app,[](bool okay,const QString& detail){
             for(const auto& line:detail.split('\n',Qt::SkipEmptyParts)){if(okay)qInfo("DLC: %s",qPrintable(line));else qCritical("DLC error: %s",qPrintable(line));}
             QApplication::exit(okay?0:1);
         });
-        QTimer::singleShot(0,&window,[&]{window.installDlcPackages(parser.values("install-dlc"),false);});
+        QTimer::singleShot(0,&window,[&]{
+            if(parser.isSet("remove-dlc"))window.removeDlc(parser.values("remove-dlc"));
+            else window.installDlcPackages(parser.values("install-dlc"),false);
+        });
     }
+    if(parser.isSet("show-dlc")) QTimer::singleShot(0,&window,[&window]{window.showDlc();});
     if(parser.isSet("show-menu")) QTimer::singleShot(300,&window,[&window,name=parser.value("show-menu")]{window.showMenu(name);});
     if(parser.isSet("show-filters")) QTimer::singleShot(0,&window,[&window]{window.showFilters();});
     if(parser.isSet("show-appearance")) QTimer::singleShot(0,&window,[&window]{window.showAppearance();});
