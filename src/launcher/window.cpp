@@ -134,8 +134,8 @@ Window::Window(const QString& file,const QString& root,bool isDemo):library(file
     QString error;library.load(&error);
     const QString installedKeys=QDir(QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation)).filePath("keys/prod.keys");
     if(library.keysPath.isEmpty()&&QFileInfo(installedKeys).isFile())library.keysPath=installedKeys;
+    resolveToolRoot(library,Toolchain::discoverRoot());
     if(!root.isEmpty())library.toolRoot=QFileInfo(root).absoluteFilePath();
-    if(library.toolRoot.isEmpty())library.toolRoot=Toolchain::discoverRoot();
     Theme::apply(*qApp,library.colorMode,library.accentColor);
     if(demo)seedDemo();
     if(!demo)running=findRunningGames(library.games);
@@ -599,7 +599,7 @@ void Window::showAppearance(){showSettings(3);}
 void Window::showControllerSettings(){showSettings(2);}
 void Window::showSettings(int initialTab){
     QDialog dialog(this);dialog.setWindowTitle("RecompLauncher — Settings");dialog.resize(690,440);auto* layout=new QVBoxLayout(&dialog);auto* tabs=new QTabWidget;layout->addWidget(tabs,1);
-    auto* toolkit=tabForm(tabs,"Engine");auto* root=new QLineEdit(library.toolRoot);toolkit->addRow("Engine folder",browseField(root,&dialog,"Choose the vendored engine folder (optional)",{},true));
+    auto* toolkit=tabForm(tabs,"Engine");auto* root=new QLineEdit(library.toolRoot);root->setPlaceholderText("The engine bundled with this launcher");toolkit->addRow("Engine folder",browseField(root,&dialog,"Choose the vendored engine folder (optional)",{},true));
     auto* health=textLabel(healthText,"Muted");health->setWordWrap(true);health->setTextInteractionFlags(Qt::TextSelectableByMouse);toolkit->addRow(health);
     connect(this,&Window::toolsChanged,&dialog,[this,health]{health->setText(healthText);});
     // the setup guide is a source-checkout document; a release has nothing to set up and does not ship docs/
@@ -625,8 +625,12 @@ void Window::showSettings(int initialTab){
     connect(buttons,&QDialogButtonBox::accepted,&dialog,[&]{
         if(builder.busy()&&(root->text()!=library.toolRoot||output->text()!=library.outputRoot||workers->value()!=library.jobs)){QMessageBox::information(&dialog,"Build in progress","Engine/build defaults cannot change during a build. Appearance can still be changed.");return;}
         const auto selectedRoot=QDir::fromNativeSeparators(root->text().trimmed());
-        if(selectedRoot!=library.toolRoot&&!QFileInfo(QDir(selectedRoot).filePath("switchrecomp.py")).isFile()){QMessageBox::warning(&dialog,"Engine not found","Select the vendored engine folder (the one containing switchrecomp.py).");return;}
-        library.toolRoot=selectedRoot.isEmpty()?QString{}:QFileInfo(selectedRoot).absoluteFilePath();library.outputRoot=QDir::fromNativeSeparators(output->text().trimmed());library.jobs=workers->value();library.showBackground=backdrop->isChecked();
+        if(!selectedRoot.isEmpty()&&selectedRoot!=library.toolRoot&&!QFileInfo(QDir(selectedRoot).filePath("switchrecomp.py")).isFile()){QMessageBox::warning(&dialog,"Engine not found","Select the vendored engine folder (the one containing switchrecomp.py).");return;}
+        if(selectedRoot.isEmpty()){library.toolRoot=Toolchain::discoverRoot();library.toolRootChosen=false;}   // empty = the bundled engine
+        else if(const QString chosen=QFileInfo(selectedRoot).absoluteFilePath();chosen!=library.toolRoot){
+            library.toolRoot=chosen;library.toolRootChosen=QDir::cleanPath(chosen)!=QDir::cleanPath(Toolchain::discoverRoot());
+        }
+        library.outputRoot=QDir::fromNativeSeparators(output->text().trimmed());library.jobs=workers->value();library.showBackground=backdrop->isChecked();
         library.colorMode=mode->currentData().toString();library.accentColor=accent->currentData().toString();
         const QString layout=buttonLayout->currentData().toString();
         if(layout!=library.buttonLayout){

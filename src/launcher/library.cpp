@@ -212,6 +212,13 @@ QString Toolchain::discoverRoot() {
     return {};
 }
 
+void resolveToolRoot(Library& library, const QString& discovered) {
+    const bool storedValid = !library.toolRoot.isEmpty() && QFileInfo(QDir(library.toolRoot).filePath("switchrecomp.py")).isFile();
+    if (library.toolRootChosen && storedValid) return;
+    if (!discovered.isEmpty() || !storedValid) library.toolRoot = discovered;
+    library.toolRootChosen = false;
+}
+
 Library::Library(QString file) : path(std::move(file)) {}
 bool Library::load(QString* error) {
     QFile file(path);
@@ -224,7 +231,7 @@ bool Library::load(QString* error) {
         return fail(error, "The library file is invalid or from an unsupported version. It was left untouched: " + path);
     }
     const auto o = doc.object();
-    toolRoot = o["toolRoot"].toString(); outputRoot = o["outputRoot"].toString(); keysPath = o["keysPath"].toString();
+    toolRoot = o["toolRoot"].toString(); toolRootChosen = o["toolRootChosen"].toBool(false); outputRoot = o["outputRoot"].toString(); keysPath = o["keysPath"].toString();
     jobs = qBound(1, o["jobs"].toInt(8), 64);
     viewMode = qBound(0, o["viewMode"].toInt(), 1);
     coverWidth = qBound(130, o["coverWidth"].toInt(180), 240);
@@ -248,7 +255,7 @@ bool Library::save(QString* error) const {
     if (!QDir().mkpath(QFileInfo(path).absolutePath())) return fail(error, "Cannot create the library directory.");
     QJsonArray entries;
     for (const auto& g : games) entries.append(g.json());
-    QJsonObject o{{"schema", 1}, {"games", entries}, {"toolRoot", toolRoot}, {"outputRoot", outputRoot}, {"keysPath", keysPath}, {"jobs", jobs},
+    QJsonObject o{{"schema", 1}, {"games", entries}, {"toolRoot", toolRoot}, {"toolRootChosen", toolRootChosen}, {"outputRoot", outputRoot}, {"keysPath", keysPath}, {"jobs", jobs},
         {"viewMode", viewMode}, {"coverWidth", coverWidth}, {"showBackground", showBackground},
         {"colorMode", colorMode}, {"accentColor", accentColor}, {"buttonLayout", buttonLayout},
         {"geometry", QString::fromLatin1(geometry.toBase64())}, {"dockState", QString::fromLatin1(dockState.toBase64())}};

@@ -169,6 +169,21 @@ private slots:
         game.buttonLayout="nintendo"; QCOMPARE(effectiveButtonLayout(game,"xbox"),QString("switch")); QVERIFY(!writeButtonLayout(path,"nintendo",&error));
         QCOMPARE(Game::fromJson({{"buttonLayout","nintendo"}}).buttonLayout,QString("switch"));
     }
+    void bundledEngineWinsOverRememberedOne() {
+        QTemporaryDir tmp;QVERIFY(tmp.isValid());
+        const QString oldEngine=tmp.filePath("old/engine"),bundled=tmp.filePath("new/engine"),chosen=tmp.filePath("mine");
+        for(const auto& d:{oldEngine,bundled,chosen})writeFile(QDir(d).filePath("switchrecomp.py"),"");
+        Library library(tmp.filePath("library.json"));
+        library.toolRoot=oldEngine;resolveToolRoot(library,bundled);             // remembered automatically by an older install
+        QCOMPARE(library.toolRoot,bundled);QVERIFY(!library.toolRootChosen);
+        library.toolRoot=chosen;library.toolRootChosen=true;resolveToolRoot(library,bundled);   // picked in Settings: kept
+        QCOMPARE(library.toolRoot,chosen);QVERIFY(library.toolRootChosen);
+        QString error;QVERIFY(library.save(&error));Library reloaded(tmp.filePath("library.json"));QVERIFY(reloaded.load(&error));QVERIFY(reloaded.toolRootChosen);
+        QVERIFY(QDir(chosen).removeRecursively());resolveToolRoot(library,bundled);       // picked, but gone
+        QCOMPARE(library.toolRoot,bundled);QVERIFY(!library.toolRootChosen);
+        library.toolRoot=oldEngine;resolveToolRoot(library,{});                          // nothing beside the launcher: keep a valid one
+        QCOMPARE(library.toolRoot,oldEngine);
+    }
     void libraryRoundTripAndCorruption() {
         QTemporaryDir tmp; const QString file=tmp.filePath("nested/library.json");
         Library lib(file); Game game=gameFromSource(tmp.filePath("My Game [v1].nup"));

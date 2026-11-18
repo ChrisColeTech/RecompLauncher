@@ -62,6 +62,7 @@ public:
     int discoverBuilds(const QString& folder);
     QString path;
     QString toolRoot, outputRoot, keysPath;
+    bool toolRootChosen = false;   // picked in Settings; otherwise the engine beside this launcher is used and toolRoot follows it
     int jobs = 8;
     int viewMode = 0, coverWidth = 180;
     bool showBackground = true;
@@ -123,6 +124,9 @@ bool inPlacePackage(const QString& path);
 QString toolkitProjectRoot(const QString& toolRoot);
 QStringList switchrSearchRoots(const QString& toolRoot);
 bool isReleaseEngine(const QString& toolRoot);
+// The engine beside this launcher (a release's engine/, a checkout's submodule) wins over the remembered toolRoot unless
+// an engine was picked in Settings and still exists: a fresh install must not keep using an older install's engine.
+void resolveToolRoot(Library& library, const QString& discovered);
 QString recompCli(const QString& toolRoot);
 
 struct LibraryFilter {
