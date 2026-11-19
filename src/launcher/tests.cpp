@@ -338,7 +338,7 @@ private slots:
         const Game old=Game::fromJson({{"id","x"},{"title","Old"}}); QVERIFY(old.updates.isEmpty()); QVERIFY(old.updateChoice.isEmpty()); QVERIFY(old.builtUpdate.isEmpty());
         // the engine's answer and the files
         GameUpdate update; QString error;
-        QVERIFY(parseUpdateInfo("UPDATE\tD:\\Games\\Update [v262144].nsp\t01001f5010dfa000\t262144\t1.1.1",&update,&error));
+        QVERIFY(parseUpdateInfo("UPDATE\t"+QDir::toNativeSeparators("D:/Games/Update [v262144].nsp")+"\t01001f5010dfa000\t262144\t1.1.1",&update,&error));
         QCOMPARE(update.path,QString("D:/Games/Update [v262144].nsp")); QCOMPARE(update.titleId,QString("01001f5010dfa000")); QCOMPARE(update.version,qint64(262144)); QCOMPARE(update.display,QString("1.1.1"));
         QVERIFY(parseUpdateInfo("UPDATE\tD:\\bare.nca\t01001f5010dfa000\t0\t",&update,&error)); QVERIFY(update.display.isEmpty());
         QVERIFY(!parseUpdateInfo("UPDATE error: X.nsp: this update is for 0100152000022000, not for this game",&update,&error)); QVERIFY(error.startsWith("X.nsp: this update"));
