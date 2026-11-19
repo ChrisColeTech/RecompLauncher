@@ -33,6 +33,26 @@ only the EXE. The engine is found by walking up from the launcher's directory un
 5. Click **Play**, double-click the cover/list row, or press Enter on the selection. Subsequent sessions use
    the existing build; launching does not recompile it.
 
+### Engines: Turbo and nxrs
+
+Each game is built by one of two engines, chosen in **Properties > Build > Engine**:
+
+- **Turbo** (Switch2RECOMP, `engine/switchrecomp.py` through the bundled Python): every game added before the choice
+  existed stays on Turbo.
+- **nxrs engine** (`nxrs-build.exe`, Windows): builds with clang into a code DLL that carries the whole engine, and
+  translates the game's shaders during the build, so Play needs no Python or .NET.
+
+Each engine builds into its own folder: the nxrs build of a game goes to `<build folder> [nxrs]`, Turbo's stays where
+it was, and switching back and forth keeps both (the card shows whether the chosen engine's folder has a build).
+Install Updates, Install DLC and Play work the same for both; for an nxrs game they run `nxrs-build update-info` and
+`nxrs-build dlc sync` (launcher contract v2: the engine's `docs/LAUNCHER_CONTRACT.md`).
+
+nxrs-build is found as `NXRS_BUILD`, then **Settings > Engine > nxrs-build** (for a development engine, e.g. the
+engine checkout's `target\release\nxrs-build.exe`), then `nxrs-engine\nxrs-build.exe` beside the launcher in a
+release. The **Engine ready** badge counts only the engines the library's games use; its popup lists both.
+From the command line: `nxrs --select-title <game> --engine nxrs|turbo` (saved; combine with `--build`,
+`--install-dlc`, `--install-update`, …) and `--nxrs-build <exe>` (saved in the library).
+
 ### DLC (add-on content)
 
 Select the game and choose **Game → Install DLC…**. The game's **DLC window** opens: one row per installed package

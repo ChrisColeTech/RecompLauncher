@@ -21,7 +21,9 @@ nxrs-<platform>-x64/
                   runtime/cpu.h runtime/cpu_helpers.c                           included by the generated C
                   runtime/nvn/gfx/dmsh_abi.h tools/nxshader/ (+ xlate_bin/)     staged into every game for Vulkan
                   tools/hactool/ (Windows)                                      NSP header inspection
-  toolchain/    python/ gcc/ dotnet/ shader-tools/
+  toolchain/    python/ gcc/ dotnet/ shader-tools/  (+ llvm-mingw/ with the nxrs engine)
+  nxrs-engine/  Windows, when packaged with --nxrs-engine: nxrs-build.exe, engine.json, the engine libraries
+                games link (nxfront.lib nxrt.lib for MSVC, gnu/*.a for llvm-mingw)
   legal/        LICENSE.txt NOTICE.txt THIRD_PARTY.md (engine), licenses/ (third party, incl. libvpx),
                 sources/ (Qt and libvpx source archives), dependency-manifest.json, build-info.json, SHA256SUMS
 ```
@@ -162,6 +164,36 @@ Engine files come from an explicit allowlist (`ENGINE_FILES` in `scripts/package
 the engine submodule's tracked files; the launcher comes from the deployed launcher folder (its executable, DLLs
 and Qt plugin folders only); dependencies come only from the selected release-dependency directory.
 The personal working tree is never recursively archived.
+
+## The nxrs engine in a release
+
+Games set to the nxrs engine (Properties > Build > Engine) are built by `nxrs-engine/nxrs-build.exe` (launcher
+contract v2, the engine's `docs/LAUNCHER_CONTRACT.md`). The engine repository (nxrs-engine) has no remote yet, so
+**CI cannot build it and CI releases do not contain it**; Turbo works as before and an nxrs game says "nxrs-build was
+not found". A local Windows release adds it with `--nxrs-engine <engine checkout>`:
+
+```powershell
+# in the engine checkout (CARGO_TARGET_DIR as you like; target\release by default)
+cargo build --release -p cli -p runtime -p front                       # nxrs-build.exe, nxfront.lib, nxrt.lib
+# gnullvm engine for machines without Visual Studio (llvm-mingw on PATH; see the engine's src/cli/README.md)
+cargo build --release --target x86_64-pc-windows-gnullvm -p front -p runtime
+# here
+python scripts/package-release.py --deps build/release-deps --launcher bin/launcher --qt C:/Qt/6.8.3/msvc2022_64 `
+    --nxrs-engine D:/Projects/RecompLauncherEngine [--nxrs-target <dir with nxrs-build.exe>] [--nxrs-gnu <dir>] [--llvm-mingw <dir>]
+```
+
+Defaults: `--nxrs-target <engine>/target/release`, `--nxrs-gnu <engine>/target/x86_64-pc-windows-gnullvm/release`,
+`--llvm-mingw <engine>/build/tools/llvm-mingw` (the x86_64 part is copied: no other targets, lldb, clangd or Python),
+the windows crate's import library from `<engine>/build/tools/gnu-libs`. `engine.json` records nxrs-build's own
+`contract` answer and the engine commit (`-dirty` with local changes), `build-info.json` the same as `nxrs_engine`, and
+`legal/licenses/nxrs-engine/` the engine's `LICENSES/`. Packaging checks that `nxrs-engine/` holds only those files, one
+complete set of engine libraries, and llvm-mingw beside the gnullvm set; the smoke test runs `nxrs-build contract` and,
+with the gnullvm set, `nxrs-build --build-runtime` with `NXRS_TOOLCHAIN=gnu` in the relocated bundle (it finds
+`toolchain/llvm-mingw` and `nxrs-engine/gnu`).
+
+What CI needs to build it too: a remote for the engine (and a token to check it out while it is private), Rust with
+the `x86_64-pc-windows-gnullvm` target, clang (LLVM 21) for the MSVC build, llvm-mingw 20261104 and the engine's codec
+archives (`build/tools/gnu-libs`) for the gnullvm build, then the `--nxrs-engine` arguments above in "Package Windows".
 
 ## Notices and source
 

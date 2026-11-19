@@ -19,6 +19,15 @@ inline constexpr auto nativeTarget = "linux";
 inline constexpr auto nativeBackend = "x11";
 #endif
 
+// The engine a game is built with: Turbo (switchrecomp.py, run through Python) or the nxrs engine (nxrs-build, run
+// directly; docs/LAUNCHER.md "Engines"). Entries from before the choice existed are Turbo's.
+inline constexpr auto engineTurbo = "turbo";
+inline constexpr auto engineNxrs = "nxrs";
+inline constexpr auto nxrsBuildName = "nxrs-build";
+inline constexpr auto nxrsFolderSuffix = " [nxrs]"; // an nxrs build of a game sits beside Turbo's: "<build folder> [nxrs]"
+// The contract nxrs-build has to answer (`nxrs-build contract` prints "nxrs-contract <n>"): 2 = subcommands + @ lines.
+inline constexpr int nxrsContractNeeded = 2;
+
 // A game update the user installed for a game (Game > Install Updates…): a package of its own, read in place.
 struct GameUpdate {
     QString path;       // the package (absolute)
@@ -31,6 +40,8 @@ struct GameUpdate {
 struct Game {
     QString id, title, source, buildDir, outputName, cover, background;
     QString renderer = "vulkan";
+    QString engine = engineTurbo;
+    bool nxrs() const { return engine == engineNxrs; }
     QString buttonLayout; // Empty inherits the launcher default (Settings > Controller).
     QString builtSource;
     QStringList dlc; // Add-on content packages (absolute paths) installed with Game > Install DLC….
@@ -60,8 +71,17 @@ struct Game {
 
 struct Toolchain {
     QString root, python, compiler, runtime, dotnet, keys;
-    bool canBuild() const;
-    QString problem() const;
+    // the nxrs engine: nxrs-build and what it says about itself (engine.json beside it, else `nxrs-build contract`)
+    QString nxrsBuild, nxrsVersion;
+    int nxrsContract = 0;
+    bool canBuild() const;   // Turbo
+    QString problem() const; // Turbo
+    QString nxrsProblem() const;
+    bool canBuild(const QString& engine) const { return problemFor(engine).isEmpty(); }
+    QString problemFor(const QString& engine) const { return engine == engineNxrs ? nxrsProblem() : problem(); }
+    // nxrs-build: NXRS_BUILD, else the one chosen in Settings (a file or its folder), else the release's nxrs-engine/
+    // beside the launcher; then reads its contract and version.
+    void findNxrs(const QString& chosen);
     QProcessEnvironment environment() const;
     static Toolchain find(const QString& root);
     static QString discoverRoot();
@@ -79,6 +99,7 @@ public:
     int discoverBuilds(const QString& folder);
     QString path;
     QString toolRoot, outputRoot, keysPath;
+    QString nxrsBuild;             // nxrs-build chosen in Settings (or --nxrs-build); empty = the bundled one
     bool toolRootChosen = false;   // picked in Settings; otherwise the engine beside this launcher is used and toolRoot follows it
     int jobs = 8;
     int viewMode = 0, coverWidth = 180;
@@ -113,6 +134,16 @@ bool samePath(const QString& left, const QString& right);
 // A package that holds the game together with its DLC (1G+1U+1D): the first build from it puts it on the game's DLC list.
 // builtBefore is the source of the previous build; a rebuild does not put back a package the user removed from the list.
 bool adoptPackageDlc(Game& game, const QString& builtBefore);
+// The engine choice. Switching moves the game to that engine's build folder ("<folder> [nxrs]" for nxrs) so both
+// builds can exist; what is built there is read back from its data folder. Returns true when something changed.
+bool setGameEngine(Game& game, const QString& engine);
+QString buildFolderFor(const QString& buildDir, const QString& engine);
+// A build on disk made by nxrs-build (its generated C carries nxrs.gen.key); Turbo's otherwise.
+bool builtWithNxrs(const QString& buildDir, const QString& outputName);
+// The nxrs-build arguments (contract v2) for a build, an update check and a DLC sync.
+QStringList nxrsBuildArguments(const Game& game, const QString& keys, int jobs);
+QStringList nxrsUpdateInfoArguments(const Game& game, const QString& keys, const QStringList& packages);
+QStringList nxrsDlcSyncArguments(const Game& game, const QString& keys);
 
 // Add-on content (DLC). The engine installs a package into the built game's data folder (switchrecomp.py
 // --install-dlc / --sync-dlc: <data>/dlc.manifest plus <data>/dlc/<title id>/); the launcher keeps the list of

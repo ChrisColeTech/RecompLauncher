@@ -45,6 +45,17 @@ rem rebuild + test, then commit the new pin
 
 Merge (do not rebase) `turbo`: the pin is a commit id, and a rebase would orphan pinned commits.
 
+## The nxrs engine
+
+The second engine, nxrs (Rust; repository nxrs-engine, local only for now), is not a submodule: point the launcher at
+its build tool with **Settings > Engine > nxrs-build**, `--nxrs-build <exe>` or `NXRS_BUILD`, e.g.
+`D:\Projects\RecompLauncherEngine\target\release\nxrs-build.exe` (`cargo build --release -p cli -p runtime -p front`
+there; nxrs-build finds `nxfront.lib` and `nxrt.lib` beside itself). Then set a game's engine in Properties > Build.
+Packaging it into a release: [RELEASES.md](RELEASES.md#the-nxrs-engine-in-a-release).
+
+A library of its own keeps a test run away from your library: `nxrs.exe --library <file>` uses that file and does not
+copy an older launcher's data folder into `%LOCALAPPDATA%\nxrs`.
+
 ## Building
 
 Windows requirements: Visual Studio 2022 Build Tools with the MSVC x64 C++ toolset, Qt 6.8 MSVC

@@ -39,6 +39,10 @@ public:
     void showFilters();
     void setAppearance(const QString& mode, const QString& accent);
     void selectTitle(const QString& title);
+    // The selected game's engine ("turbo" or "nxrs"; --engine): its build folder follows (Properties > Build > Engine).
+    bool setEngine(const QString& engine);
+    // nxrs-build to use instead of the bundled one (Settings > Engine; --nxrs-build); empty = the bundled one.
+    void setNxrsBuild(const QString& path);
     void showAppearance();
     void showControllerSettings();
     void showMenu(const QString& name);   // pops a menu of the title bar open by its name ("Game")
@@ -98,6 +102,7 @@ private:
     void dlcReport(const QString& title, const QString& text, bool error);
     void showContextMenu(const QPoint& global);
     void showToolPopup();
+    QString toolProblem() const;   // what keeps the engines the library uses from building; empty when nothing does
     void message(const QString& title, const QString& text, bool error = false);
     void seedDemo();
     Game* selected();
@@ -110,6 +115,7 @@ private:
     bool updateQuiet = false;
     DlcReason dlcReason = DlcInstalled;
     bool dlcQuiet = false;
+    bool buildDlcPending = false;   // a finished build is putting its DLC into the data folder (smokeFinished waits)
     QString selectedId, healthText;
     bool demo = false, closing = false, dotnetReady = false;
     int toolsGeneration = 0;

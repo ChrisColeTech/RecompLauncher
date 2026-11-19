@@ -15,6 +15,9 @@ public:
     bool busy() const { return active; }
     QString gameId() const { return game.id; }
     static QStringList arguments(const Game& game, const Toolchain& tools, int jobs);
+    // The program a build of this game runs and its arguments: Python with recomp_cli.py (Turbo) or nxrs-build (nxrs).
+    static QString program(const Game& game, const Toolchain& tools);
+    static QStringList commandLine(const Game& game, const Toolchain& tools, int jobs);
     // The engine said the package just built also holds add-on content (a 1G+1U+1D NSP).
     bool sourceHoldsDlc() const { return holdsDlc; }
     static bool reportsPackageDlc(const QString& line) { return line.startsWith("DLC: this package also holds add-on content"); }

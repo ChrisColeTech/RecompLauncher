@@ -38,7 +38,6 @@ int main(int argc, char** argv) {
     QApplication app(argc, argv);
     QApplication::setOrganizationName(QString{});   // no organization level: the data folder is %LOCALAPPDATA%\nxrs
     QApplication::setApplicationName("nxrs");
-    migrateLegacyData();
     QApplication::setApplicationVersion(NXRS_VERSION);
     QApplication::setStyle("Fusion");
     Theme::apply(app);
@@ -68,12 +67,16 @@ int main(int argc, char** argv) {
     parser.addOption({"update-choice", "Version to build for the --select-title game: newest, none or an installed package", "choice"});
     parser.addOption({"show-updates", "Open the selected game's Updates window (Game > Install Updates…)"});
     parser.addOption({"build", "Build the --select-title game with its saved options and exit"});
+    parser.addOption({"engine", "Engine of the --select-title game, saved: turbo or nxrs (before --build and the DLC/update options)", "engine"});
+    parser.addOption({"nxrs-build", "nxrs-build to use instead of the bundled one, saved in the library (empty: the bundled one)", "exe"});
     parser.addOption({"show-dlc", "Open the selected game's DLC window (Game > Install DLC…)"});
     parser.addOption({"show-menu", "Open a menu of the title bar (File, Game, Keys, View, Help)", "name"});
     parser.addOption({"screenshot", "Save a launcher preview and exit", "png"});
     parser.addOption({"smoke-build", "Build a synthetic test input and exit (diagnostics)", "input"});
     parser.addOption({"build-output", "Output folder for --smoke-build", "directory"});
     parser.process(app);
+    // a library of its own (--library: tests, a portable library) leaves the default data folder alone
+    if(!parser.isSet("library"))migrateLegacyData();
     if(parser.isSet("check-image")){QImageReader reader(parser.value("check-image"));const auto image=reader.read();if(image.isNull()){qCritical("Artwork decode failed: %s",qPrintable(reader.errorString()));return 1;}qInfo("Artwork decoded: %d x %d",image.width(),image.height());return 0;}
     QString libraryPath=parser.value("library");
     if(libraryPath.isEmpty()) libraryPath=QDir(QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation)).filePath("library.json");
@@ -81,7 +84,9 @@ int main(int argc, char** argv) {
     if(parser.isSet("smoke-build") && (parser.value("build-output").isEmpty() || parser.value("library").isEmpty())) return 2;
     window.show();
     if(parser.isSet("import-build")) window.importBuild(parser.value("import-build"));
+    if(parser.isSet("nxrs-build"))window.setNxrsBuild(parser.value("nxrs-build"));
     if(parser.isSet("select-title"))window.selectTitle(parser.value("select-title"));
+    if(parser.isSet("engine")&&!window.setEngine(parser.value("engine"))){qCritical("Cannot set the engine: select a game that is not running or building, and use turbo or nxrs");return 2;}
     if(parser.isSet("preview-theme")||parser.isSet("preview-accent"))window.setAppearance(parser.value("preview-theme").isEmpty()?"dark":parser.value("preview-theme"),parser.value("preview-accent").isEmpty()?"lime":parser.value("preview-accent"));
     if(parser.isSet("list-view")) window.setViewMode(1);
     if(parser.isSet("show-console")) window.showBuildOutput();

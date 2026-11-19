@@ -3,6 +3,7 @@
 #include "buildmanager.h"
 #include <QDir>
 #include <QFileInfo>
+#include <QHash>
 #include <QProcessEnvironment>
 #include <QRegularExpression>
 #include <QTimer>
@@ -48,9 +49,17 @@ QStringList BuildManager::arguments(const Game& game, const Toolchain& tools, in
     else if (!update.isEmpty()) arguments << "--update" << QDir::toNativeSeparators(update);
     return arguments;
 }
+QString BuildManager::program(const Game& game, const Toolchain& tools) { return game.nxrs() ? tools.nxrsBuild : tools.python; }
+QStringList BuildManager::commandLine(const Game& game, const Toolchain& tools, int jobs) {
+    return game.nxrs() ? nxrsBuildArguments(game, tools.keys, jobs) : arguments(game, tools, jobs);
+}
+// Where an engine process runs: Turbo in its engine folder (recomp_cli.py imports from there), nxrs-build in its own.
+static QString engineFolder(const Game& game, const Toolchain& tools) {
+    return game.nxrs() ? QFileInfo(tools.nxrsBuild).absolutePath() : tools.root;
+}
 bool BuildManager::start(const Game& next, const Toolchain& tools, int jobs, QString* error) {
     if (active) { *error = "Another build is already running."; return false; }
-    if (!tools.canBuild()) { *error = tools.problem(); return false; }
+    if (!tools.canBuild(next.engine)) { *error = tools.problemFor(next.engine); return false; }
     if (next.source.endsWith(".nsp", Qt::CaseInsensitive) && (tools.keys.isEmpty() || !QFileInfo(tools.keys).isFile())) {
         *error = "NSP builds need prod.keys. Use Keys > Install keys first."; return false;
     }
@@ -63,14 +72,14 @@ bool BuildManager::start(const Game& next, const Toolchain& tools, int jobs, QSt
     game = next; cancelled = false; holdsDlc = false; pending.clear();
     log.setFileName(QDir(game.buildDir).filePath(game.outputName + ".build.log"));
     if (!log.open(QIODevice::WriteOnly | QIODevice::Truncate)) { *error = log.errorString(); return false; }
-    log.write(("SwitchRecomp build · " + QDateTime::currentDateTime().toString(Qt::ISODate) + "\n").toUtf8());
+    log.write(((game.nxrs() ? "nxrs build · " : "SwitchRecomp build · ") + QDateTime::currentDateTime().toString(Qt::ISODate) + "\n").toUtf8());
     auto env = tools.environment();
     env.insert("PYTHONUTF8", "1"); env.insert("PYTHONUNBUFFERED", "1");
     process.setProcessEnvironment(env);
-    process.setWorkingDirectory(tools.root);
+    process.setWorkingDirectory(engineFolder(game, tools));
     active = true;
     emit progress("Starting recompiler", 0, 0);
-    process.start(tools.python, arguments(game, tools, jobs));
+    process.start(program(game, tools), commandLine(game, tools, jobs));
     return true;
 }
 void BuildManager::readOutput() {
@@ -81,10 +90,21 @@ void BuildManager::readOutput() {
     while ((pos = pending.indexOf('\n')) >= 0) {
         const QString line = QString::fromUtf8(pending.left(pos)).trimmed();
         pending.remove(0, pos + 1);
-        emit output(line); parseLine(line);
+        if (!line.startsWith('@')) emit output(line);   // nxrs-build's machine lines are for parseLine only
+        parseLine(line);
     }
 }
 void BuildManager::parseLine(const QString& line) {
+    // contract v2: "@progress\t<stage>\t<done>\t<total>" (open, analyze, translate, compile, link) and "@result\t..."
+    if (line.startsWith("@progress\t")) {
+        const auto parts = line.split('\t');
+        static const QHash<QString, QString> stages{{"open", "Opening the game"}, {"analyze", "Analyzing ARM64 code"},
+            {"translate", "Generating native C"}, {"compile", "Compiling native code"}, {"link", "Linking native module"},
+            {"shaders", "Translating shaders"}, {"data", "Preparing game data"}};
+        emit progress(stages.value(parts.value(1), parts.value(1)), parts.value(2).toInt(), parts.value(3).toInt());
+        return;
+    }
+    if (line.startsWith('@')) return;
     static const QRegularExpression counts("(?:C generated:|compiled)\\s+(\\d+)/(\\d+)");
     const auto match = counts.match(line);
     if (match.hasMatch()) {
@@ -138,16 +158,19 @@ UpdateProbe::UpdateProbe(QObject* parent) : QObject(parent) {
 }
 bool UpdateProbe::start(const Game& next, const Toolchain& tools, const QStringList& packages, QString* error) {
     if (active) { *error = "Updates are being checked already."; return false; }
-    if (tools.root.isEmpty() || tools.python.isEmpty()) { *error = tools.problem().isEmpty() ? "Python is missing." : tools.problem(); return false; }
+    if (next.nxrs() ? !tools.canBuild(engineNxrs) : (tools.root.isEmpty() || tools.python.isEmpty())) {
+        *error = !tools.problemFor(next.engine).isEmpty() ? tools.problemFor(next.engine) : QString("Python is missing."); return false;
+    }
     if (tools.keys.isEmpty() || !QFileInfo(tools.keys).isFile()) { *error = "Installing an update needs prod.keys. Use Keys > Install keys first."; return false; }
     if (!next.sourceAvailable()) { *error = "The game's own package is missing; it is needed to check that the update belongs to it."; return false; }
     game = next; pending.clear(); errors.clear(); found.clear();
     auto env = tools.environment();
     env.insert("PYTHONUTF8", "1"); env.insert("PYTHONUNBUFFERED", "1");
     process.setProcessEnvironment(env);
-    process.setWorkingDirectory(tools.root);
+    process.setWorkingDirectory(engineFolder(game, tools));
     active = true;
-    process.start(tools.python, updateInfoArguments(game, tools.root, packages));
+    if (game.nxrs()) process.start(tools.nxrsBuild, nxrsUpdateInfoArguments(game, tools.keys, packages));
+    else process.start(tools.python, updateInfoArguments(game, tools.root, packages));
     return true;
 }
 void UpdateProbe::readOutput() {
@@ -187,7 +210,9 @@ DlcInstaller::DlcInstaller(QObject* parent) : QObject(parent) {
 }
 bool DlcInstaller::start(const Game& next, const Toolchain& tools, QString* error) {
     if (active) { *error = "Another DLC installation is already running."; return false; }
-    if (tools.root.isEmpty() || tools.python.isEmpty()) { *error = tools.problem().isEmpty() ? "Python is missing." : tools.problem(); return false; }
+    if (next.nxrs() ? !tools.canBuild(engineNxrs) : (tools.root.isEmpty() || tools.python.isEmpty())) {
+        *error = !tools.problemFor(next.engine).isEmpty() ? tools.problemFor(next.engine) : QString("Python is missing."); return false;
+    }
     if (!QDir(next.dataDir()).exists()) { *error = "Build the game first: DLC is installed into its data folder."; return false; }
     if (!next.dlc.isEmpty() && (tools.keys.isEmpty() || !QFileInfo(tools.keys).isFile())) {
         *error = "Installing DLC needs prod.keys. Use Keys > Install keys first."; return false;
@@ -196,9 +221,10 @@ bool DlcInstaller::start(const Game& next, const Toolchain& tools, QString* erro
     auto env = tools.environment();
     env.insert("PYTHONUTF8", "1"); env.insert("PYTHONUNBUFFERED", "1");
     process.setProcessEnvironment(env);
-    process.setWorkingDirectory(tools.root);
+    process.setWorkingDirectory(engineFolder(game, tools));
     active = true;
-    process.start(tools.python, dlcSyncArguments(game, tools.root));
+    if (game.nxrs()) process.start(tools.nxrsBuild, nxrsDlcSyncArguments(game, tools.keys));
+    else process.start(tools.python, dlcSyncArguments(game, tools.root));
     return true;
 }
 void DlcInstaller::readOutput() {

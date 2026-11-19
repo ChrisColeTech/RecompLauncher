@@ -246,6 +246,59 @@ class ReleaseChecks(unittest.TestCase):
         with patch.object(package, 'ENGINE', engine):
             with self.assertRaisesRegex(FileNotFoundError, 'submodule'): list(package.engine_files())
 
+    def nxrs(self, root, gnu=True, msvc=True):
+        """The nxrs engine as stage_nxrs leaves it in a release."""
+        names = ['nxrs-build.exe'] + (list(package.NXRS_MSVC) if msvc else []) + (list(package.NXRS_GNU) if gnu else [])
+        for name in names:
+            path = root / package.NXRS_ENGINE / name; path.parent.mkdir(parents=True, exist_ok=True); path.write_bytes(b'fixture')
+        (root / package.NXRS_ENGINE / 'engine.json').write_text(json.dumps({'contract': 2, 'engine': 'nxrs', 'version': 'abc'}))
+        if gnu:
+            clang = root / package.LLVM_MINGW / 'bin/clang.exe'; clang.parent.mkdir(parents=True, exist_ok=True); clang.write_bytes(b'clang')
+        for name in ('LICENSE', 'llvm-mingw.txt'):
+            path = root / LEGAL / 'licenses/nxrs-engine' / name; path.parent.mkdir(parents=True, exist_ok=True); path.write_text('fixture')
+
+    def test_nxrs_engine_is_optional_and_complete_when_shipped(self):
+        root = self.bundle('windows'); package.validate_contents(root, 'windows')            # a release without it (CI)
+        self.nxrs(root); package.validate_contents(root, 'windows')
+        for name in ['nxrs-engine/nxrs-build.exe', 'nxrs-engine/engine.json', 'nxrs-engine/gnu/libnxrt.a', 'nxrs-engine/nxfront.lib',
+                     'toolchain/llvm-mingw/bin/clang.exe', 'legal/licenses/nxrs-engine/llvm-mingw.txt']:
+            path = root / name; data = path.read_bytes(); path.unlink()
+            with self.assertRaises(FileNotFoundError, msg=name): package.validate_contents(root, 'windows')
+            path.write_bytes(data)
+        for name in ('nxrs-engine/nxfront.lib', 'nxrs-engine/nxrt.lib'): (root / name).unlink()   # gnullvm only: fine
+        package.validate_contents(root, 'windows')
+        for name in ('nxrs-engine/switchrecomp.py', 'nxrs-engine/target/release/nxrs-build.pdb', 'nxrs-engine/gnu/libnxrt.rlib'):
+            path = root / name; path.parent.mkdir(parents=True, exist_ok=True); path.write_bytes(b'clutter')
+            with self.assertRaisesRegex(RuntimeError, 'nxrs engine file outside', msg=name): package.validate_contents(root, 'windows')
+            path.unlink()
+        (root / 'nxrs-engine/engine.json').write_text(json.dumps({'contract': 1, 'engine': 'nxrs'}))
+        with self.assertRaisesRegex(RuntimeError, 'contract 2'): package.validate_contents(root, 'windows')
+        linux = self.bundle('linux'); self.nxrs(linux)
+        with self.assertRaisesRegex(RuntimeError, 'Unexpected top-level'): package.validate_contents(linux, 'linux')
+
+    def test_nxrs_engine_staged_from_its_checkout(self):
+        engine = self.root / 'nxrs engine'; target = engine / 'target/release'; gnu = engine / 'target/gnullvm'; llvm = engine / 'build/tools/llvm-mingw'
+        for name in ['nxrs-build.exe', 'nxfront.lib', 'nxrt.lib', 'nxrs-build.pdb', 'nxrt-dev.exe']: (target / name).parent.mkdir(parents=True, exist_ok=True); (target / name).write_bytes(b'x')
+        for name in ['libnxfront.a', 'libnxrt.a', 'libnxrt.rlib']: gnu.mkdir(parents=True, exist_ok=True); (gnu / name).write_bytes(b'x')
+        for name in ['bin/clang.exe', 'bin/ld.lld.exe', 'bin/lldb.exe', 'bin/clangd.exe', 'x86_64-w64-mingw32/lib/libc++.a',
+                     'i686-w64-mingw32/lib/libc++.a', 'aarch64-w64-mingw32/lib/x.a', 'python/bin/python.exe', 'include/stdio.h',
+                     'lib/clang/21/lib/windows/libclang_rt.builtins-x86_64.a']:
+            path = llvm / name; path.parent.mkdir(parents=True, exist_ok=True); path.write_bytes(b'x')
+        for name in ['LICENSES/llvm-mingw.txt', 'LICENSES/ryujinx.txt', 'build/tools/gnu-libs/libwindows.0.52.0.a']:
+            path = engine / name; path.parent.mkdir(parents=True, exist_ok=True); path.write_bytes(b'x')
+        stage = self.root / 'stage'; answer = type('Answer', (), {'stdout': 'nxrs-contract 2\r\n'})()
+        with patch.object(package.subprocess, 'run', return_value=answer), \
+             patch.object(package, 'nxrs_version', return_value={'version': 'abc123', 'commit': 'abc123', 'local_changes': False}):
+            package.stage_nxrs(stage, engine, target, gnu, llvm)
+        shipped = {p.relative_to(stage).as_posix() for p in stage.rglob('*') if p.is_file()}
+        self.assertEqual({n for n in shipped if n.startswith('nxrs-engine/')}, {'nxrs-engine/' + n for n in package.NXRS_FILES})
+        self.assertEqual(json.loads((stage / 'nxrs-engine/engine.json').read_text()), {'contract': 2, 'engine': 'nxrs', 'version': 'abc123'})
+        self.assertEqual({n for n in shipped if n.startswith('toolchain/')}, {'toolchain/llvm-mingw/' + n for n in (
+            'bin/clang.exe', 'bin/ld.lld.exe', 'x86_64-w64-mingw32/lib/libc++.a', 'include/stdio.h', 'lib/clang/21/lib/windows/libclang_rt.builtins-x86_64.a')})
+        self.assertTrue({'legal/licenses/nxrs-engine/llvm-mingw.txt', 'legal/licenses/nxrs-engine/ryujinx.txt', 'legal/licenses/nxrs-engine/LICENSE'} <= shipped)
+        with patch.object(package.subprocess, 'run', return_value=type('Answer', (), {'stdout': 'usage'})()):
+            with self.assertRaisesRegex(RuntimeError, 'contract'): package.stage_nxrs(self.root / 'stage2', engine, target, None, None)
+
     def test_launcher_folder_allowlist(self):
         deploy = self.root / 'deploy'
         for name in ('nxrs.exe', 'Qt6Core.dll', 'platforms/qwindows.dll', 'imageformats/qwebp.dll',

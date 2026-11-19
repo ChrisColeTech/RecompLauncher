@@ -7,7 +7,10 @@ Layout (the launcher finds engine/ and toolchain/ beside its own executable):
   nxrs(.exe)  the Qt launcher with its Qt/MSVC DLLs and plugin folders (Linux: lib/, plugins/, qt.conf)
   engine/               only what a game build reads: the recompiler modules, recomp_cli.py, the prebuilt native
                         runtime, the runtime header/helper the generated C includes, the shader helper (+ hactool)
-  toolchain/            python, gcc, dotnet, shader-tools
+  toolchain/            python, gcc, dotnet, shader-tools (+ llvm-mingw for the nxrs engine)
+  nxrs-engine/          Windows, when packaged with --nxrs-engine: nxrs-build.exe, engine.json and the engine libraries
+                        it links games against (MSVC nxfront.lib/nxrt.lib, gnullvm gnu/*.a); with toolchain/llvm-mingw
+                        a game builds on a machine without Visual Studio
   legal/                engine LICENSE/NOTICE, third-party licenses, corresponding sources, provenance, SHA256SUMS
 The complete source (launcher + engine at the pinned commit) is the separate source archive of each release."""
 import argparse
@@ -26,6 +29,19 @@ ROOT = Path(__file__).resolve().parents[1]
 NAME = 'nxrs'   # archive, top-level folder and launcher executable name
 ENGINE = ROOT / 'third_party/Switch2RECOMP'   # engine submodule in the checkout
 RELEASE_ENGINE, TOOLCHAIN, LEGAL = Path('engine'), Path('toolchain'), Path('legal')
+# The nxrs engine (Windows only): nxrs-build (the launcher runs it for games set to the nxrs engine), engine.json (its
+# launcher contract, read without starting it) and the engine libraries a game's code DLL links: the MSVC ones (used
+# when Visual Studio and a clang are installed) and/or the gnullvm ones, which link with the bundled llvm-mingw.
+NXRS_ENGINE = Path('nxrs-engine')
+NXRS_MSVC = ('nxfront.lib', 'nxrt.lib')
+NXRS_GNU = ('gnu/libnxfront.a', 'gnu/libnxrt.a', 'gnu/libwindows.0.52.0.a')
+NXRS_FILES = ('nxrs-build.exe', 'engine.json') + NXRS_MSVC + NXRS_GNU
+NXRS_CONTRACT = 2   # the contract this launcher speaks (library.h nxrsContractNeeded)
+LLVM_MINGW = TOOLCHAIN / 'llvm-mingw'
+# llvm-mingw as released holds four targets, a debugger and Python; a game build needs the x86_64 target's compiler,
+# linker, headers and libraries only
+LLVM_MINGW_SKIP = ('aarch64-w64-mingw32', 'armv7-w64-mingw32', 'i686-w64-mingw32', 'python', 'lldb*', 'liblldb*',
+                   'clangd*', 'clang-tidy*', 'libpython*')
 TOOLS = ('python', 'gcc', 'dotnet', 'shader-tools')
 # Engine files a game build reads, as tracked in the submodule; everything else there builds the runtime or is
 # developer tooling. switchrecomp.py imports nxloader + codegen; codegen imports a64; nxloader imports nup + nsp + nca (encrypted and combined NSPs)
@@ -114,6 +130,7 @@ def check_layout(stage, platform):
         name = path.name
         if path.is_dir():
             if name in (RELEASE_ENGINE.name, TOOLCHAIN.name, LEGAL.name): continue
+            if platform == 'windows' and name == NXRS_ENGINE.name: continue
             if platform == 'linux' and name == 'lib': continue   # bundled Qt/system shared libraries
             # Qt plugin folders: windeployqt's platforms, imageformats, styles, ...; Linux plugins/<kind>
             if all(p.is_dir() or plugin in p.name for p in path.rglob('*')): continue
@@ -125,6 +142,34 @@ def check_layout(stage, platform):
         name = path.relative_to(stage / RELEASE_ENGINE).as_posix()
         if path.is_file() and not engine_allowed(name, platform):
             raise RuntimeError('Engine file outside the release allowlist: ' + name)
+    for path in (stage / NXRS_ENGINE).rglob('*'):
+        name = path.relative_to(stage / NXRS_ENGINE).as_posix()
+        if path.is_file() and name not in NXRS_FILES:
+            raise RuntimeError('nxrs engine file outside the release allowlist: ' + name)
+
+
+def check_nxrs(stage, platform):
+    """The nxrs engine, when the release has it: nxrs-build answering this launcher's contract, one complete set of
+    engine libraries, llvm-mingw beside the gnullvm set, and the engine's licenses."""
+    engine = stage / NXRS_ENGINE
+    if not engine.exists():
+        if (stage / LLVM_MINGW).exists(): raise RuntimeError('toolchain/llvm-mingw without the nxrs engine')
+        return
+    if platform != 'windows': raise RuntimeError('The nxrs engine builds Windows games only')
+    for name in ('nxrs-build.exe', 'engine.json'):
+        if not (engine / name).is_file() or not (engine / name).stat().st_size: raise FileNotFoundError((NXRS_ENGINE / name).as_posix())
+    info = json.loads((engine / 'engine.json').read_text())
+    if info.get('engine') != 'nxrs' or int(info.get('contract', 0)) < NXRS_CONTRACT:
+        raise RuntimeError('nxrs-engine/engine.json does not answer launcher contract %d' % NXRS_CONTRACT)
+    sets = {kind: [(engine / n).is_file() for n in names] for kind, names in (('msvc', NXRS_MSVC), ('gnu', NXRS_GNU))}
+    for kind, present in sets.items():
+        if any(present) and not all(present): raise FileNotFoundError('Incomplete %s engine libraries in nxrs-engine/' % kind)
+    if not any(all(present) for present in sets.values()): raise FileNotFoundError('nxrs-engine/ holds no engine libraries')
+    if all(sets['gnu']) and not (stage / LLVM_MINGW / 'bin/clang.exe').is_file():
+        raise FileNotFoundError((LLVM_MINGW / 'bin/clang.exe').as_posix())
+    licenses = stage / LEGAL / 'licenses/nxrs-engine'
+    for name in ('LICENSE', 'llvm-mingw.txt'):
+        if not (licenses / name).is_file(): raise FileNotFoundError((LEGAL / 'licenses/nxrs-engine' / name).as_posix())
 
 
 def validate_contents(stage, platform):
@@ -140,6 +185,7 @@ def validate_contents(stage, platform):
                  'toolchain/gcc/licenses', 'toolchain/shader-tools/licenses'):
         if not any(p.is_file() for p in (stage / name).rglob('*')): raise FileNotFoundError(name)
     check_layout(stage, platform)
+    check_nxrs(stage, platform)
     manifest = json.loads((stage / LEGAL / 'dependency-manifest.json').read_text())
     if manifest['platform'] != platform:
         raise RuntimeError('Dependency manifest platform mismatch')
@@ -214,8 +260,8 @@ def git(repo, *args, optional=False):
                                    stderr=subprocess.DEVNULL if optional else None).strip()
 
 
-def provenance(platform):
-    """Both commits: the launcher checkout and the engine submodule pinned in it."""
+def provenance(platform, nxrs=None):
+    """Both commits: the launcher checkout and the engine submodule pinned in it (and the nxrs engine's, packaged)."""
     dirty = any(git(repo, 'status', '--porcelain', '--untracked-files=normal') for repo in (ROOT, ENGINE))
     engine_commit = git(ENGINE, 'rev-parse', 'HEAD')
     info = {'version': (ROOT / 'VERSION').read_text().strip(), 'commit': git(ROOT, 'rev-parse', 'HEAD'), 'engine_commit': engine_commit,
@@ -225,6 +271,45 @@ def provenance(platform):
     if engine_url: info['engine_source'] = engine_url.removesuffix('.git') + '/tree/' + engine_commit
     try: info['source'] = git(ROOT, 'remote', 'get-url', 'origin', optional=True).removesuffix('.git') + '/tree/' + info['commit']
     except subprocess.CalledProcessError: pass
+    if nxrs: info['nxrs_engine'] = nxrs
+    return info
+
+
+def nxrs_version(engine):
+    """The nxrs engine checkout's commit and whether it had local changes (it has no remote yet)."""
+    try:
+        commit = git(engine, 'rev-parse', 'HEAD', optional=True)
+        dirty = bool(git(engine, 'status', '--porcelain', '--untracked-files=no', optional=True))
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return {'version': 'unknown', 'commit': '', 'local_changes': True}
+    return {'version': commit[:12] + ('-dirty' if dirty else ''), 'commit': commit, 'local_changes': dirty}
+
+
+def stage_nxrs(stage, engine, target, gnu, llvm):
+    """nxrs-engine/ and toolchain/llvm-mingw from an nxrs engine checkout and its builds: nxrs-build.exe with the MSVC
+    engine libraries beside it (target), the gnullvm ones (gnu, plus the windows crate's import library the engine
+    checkout keeps in build/tools/gnu-libs), llvm-mingw trimmed to the x86_64 target, and the engine's licenses."""
+    out = stage / NXRS_ENGINE
+    exe = target / 'nxrs-build.exe'
+    if not exe.is_file(): raise FileNotFoundError(exe)
+    copy(exe, out / 'nxrs-build.exe')
+    if all((target / n).is_file() for n in NXRS_MSVC):
+        for name in NXRS_MSVC: copy(target / name, out / name)
+    if gnu and all((gnu / Path(n).name).is_file() for n in NXRS_GNU[:2]):
+        for name in NXRS_GNU[:2]: copy(gnu / Path(name).name, out / name)
+        copy(engine / 'build/tools/gnu-libs/libwindows.0.52.0.a', out / 'gnu/libwindows.0.52.0.a')
+        if not llvm or not (llvm / 'bin/clang.exe').is_file(): raise FileNotFoundError('llvm-mingw (bin/clang.exe) for the gnullvm engine')
+        shutil.copytree(llvm, stage / LLVM_MINGW, ignore=shutil.ignore_patterns(*LLVM_MINGW_SKIP, '__pycache__', '*.pdb'))
+    answer = subprocess.run([str(out / 'nxrs-build.exe'), 'contract'], capture_output=True, text=True, timeout=60).stdout
+    match = re.search(r'nxrs-contract (\d+)', answer)
+    if not match: raise RuntimeError('nxrs-build does not answer "contract": ' + answer.strip())
+    info = nxrs_version(engine)
+    (out / 'engine.json').write_text(json.dumps({'contract': int(match.group(1)), 'engine': 'nxrs', 'version': info['version']}, indent=2) + '\n')
+    licenses = stage / LEGAL / 'licenses/nxrs-engine'
+    tree(engine / 'LICENSES', licenses)
+    license = next((engine / n for n in ('LICENSE', 'LICENSE.txt', 'LICENSE-MIT') if (engine / n).is_file()), None)
+    if license: copy(license, licenses / 'LICENSE')
+    else: (licenses / 'LICENSE').write_text('nxrs engine: MIT License (see its README, Credits and licenses).\n')
     return info
 
 
@@ -327,6 +412,13 @@ def main():
     ap.add_argument('--work', type=Path, help='Optional staging directory on a faster filesystem')
     ap.add_argument('--name', default=NAME)
     ap.add_argument('--stage-only', action='store_true')
+    ap.add_argument('--nxrs-engine', type=Path, help='nxrs engine checkout to bundle (Windows): its LICENSES/, '
+                    'build/tools/gnu-libs and, by default, its builds and build/tools/llvm-mingw')
+    ap.add_argument('--nxrs-target', type=Path, help='folder with nxrs-build.exe and the MSVC engine libraries '
+                    '(default: <nxrs engine>/target/release)')
+    ap.add_argument('--nxrs-gnu', type=Path, help='folder with the gnullvm engine libraries libnxfront.a, libnxrt.a '
+                    '(default: <nxrs engine>/target/x86_64-pc-windows-gnullvm/release)')
+    ap.add_argument('--llvm-mingw', type=Path, help='llvm-mingw to bundle (default: <nxrs engine>/build/tools/llvm-mingw)')
     args = ap.parse_args()
     if not re.fullmatch(r'[A-Za-z0-9._-]+', args.name): ap.error('Invalid archive name')
     platform = 'windows' if os.name == 'nt' else 'linux'
@@ -350,6 +442,14 @@ def main():
         copy(ENGINE / 'tools/hactool/LICENSE', engine / 'tools/hactool/LICENSE')
     # toolchain/: the bundled interpreters and compilers
     for name in TOOLS: tree(args.deps / name, stage / TOOLCHAIN / name)
+    # nxrs-engine/ (+ toolchain/llvm-mingw): the nxrs engine, when one is given
+    nxrs = None
+    if args.nxrs_engine:
+        if platform != 'windows': ap.error('--nxrs-engine: the nxrs engine builds Windows games only')
+        engine_root = args.nxrs_engine.resolve()
+        nxrs = stage_nxrs(stage, engine_root, (args.nxrs_target or engine_root / 'target/release').resolve(),
+                          (args.nxrs_gnu or engine_root / 'target/x86_64-pc-windows-gnullvm/release').resolve(),
+                          (args.llvm_mingw or engine_root / 'build/tools/llvm-mingw').resolve())
     # legal/: notices, corresponding sources and provenance
     legal = stage / LEGAL
     for source, name in ENGINE_LEGAL.items(): copy(ENGINE / source, legal / name)
@@ -363,7 +463,7 @@ def main():
         strip_gcc_rpath(stage)
     dereference_symlinks(stage)
     validate_contents(stage, platform)
-    (legal / 'build-info.json').write_text(json.dumps(provenance(platform), indent=2) + '\n')
+    (legal / 'build-info.json').write_text(json.dumps(provenance(platform, nxrs), indent=2) + '\n')
     sums = legal / 'SHA256SUMS'   # paths relative to the release root: cd <release> && sha256sum -c legal/SHA256SUMS
     files = sorted(p for p in stage.rglob('*') if p.is_file())
     sums.write_text(''.join(digest(p) + '  ' + p.relative_to(stage).as_posix() + '\n' for p in files))

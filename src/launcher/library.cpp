@@ -130,7 +130,7 @@ QJsonObject Game::json() const {
         {"builtSource", builtSource}, {"buildIncomplete", buildIncomplete}, {"lastPlayed", lastPlayed.toString(Qt::ISODate)},
         {"lastBuilt", lastBuilt.toString(Qt::ISODate)}, {"dlc", QJsonArray::fromStringList(dlc)},
         {"updates", [this] { QJsonArray list; for (const auto& u : updates) list.append(QJsonObject{{"path", u.path}, {"titleId", u.titleId}, {"version", u.version}, {"display", u.display}}); return list; }()},
-        {"updateChoice", updateChoice}, {"builtUpdate", builtUpdate}};
+        {"updateChoice", updateChoice}, {"builtUpdate", builtUpdate}, {"engine", engine}};
 }
 Game Game::fromJson(const QJsonObject& o) {
     Game g;
@@ -142,6 +142,7 @@ Game Game::fromJson(const QJsonObject& o) {
     g.optimization = qBound(0, o["optimization"].toInt(2), 3);
     if (g.renderer != "vulkan" && g.renderer != "opengl") g.renderer = "opengl";
     g.buttonLayout = normalizeButtonLayout(o["buttonLayout"].toString());
+    g.engine = o["engine"].toString() == engineNxrs ? engineNxrs : engineTurbo;   // absent (an older library): Turbo
     g.builtSource = o["builtSource"].toString();
     g.buildIncomplete = o["buildIncomplete"].toBool();
     g.lastPlayed = QDateTime::fromString(o["lastPlayed"].toString(), Qt::ISODate);
@@ -173,6 +174,48 @@ QString Toolchain::problem() const {
     if (compiler.isEmpty()) return "GCC is missing. Extract the complete engine bundle or run the setup script.";
     if (runtime.isEmpty()) return "The native runtime is missing. Extract the complete engine bundle or build the runtime first.";
     return {};
+}
+QString Toolchain::nxrsProblem() const {
+#ifndef Q_OS_WIN
+    return "The nxrs engine builds Windows games only. Choose Turbo for this game in Properties > Build.";
+#else
+    if (nxrsBuild.isEmpty())
+        return "nxrs-build was not found. It ships in the nxrs-engine folder beside nxrs; for a development engine choose it in File > Settings > Engine (or set NXRS_BUILD).";
+    if (nxrsContract < nxrsContractNeeded)
+        return QString("%1 answers launcher contract %2; this launcher needs %3. Use a newer nxrs-build.")
+            .arg(QDir::toNativeSeparators(nxrsBuild)).arg(nxrsContract).arg(nxrsContractNeeded);
+    return {};
+#endif
+}
+void Toolchain::findNxrs(const QString& chosen) {
+    nxrsBuild.clear(); nxrsVersion.clear(); nxrsContract = 0;
+    const QString exe = QString(nxrsBuildName) + executableSuffix;
+    const auto resolve = [&exe](const QString& path) {
+        if (path.isEmpty()) return QString{};
+        const QFileInfo info(QDir::fromNativeSeparators(path));
+        const QString inside = QDir(info.absoluteFilePath()).filePath(exe);
+        if (info.isDir()) return QFileInfo(inside).isFile() ? inside : QString{};
+        return info.isFile() ? info.absoluteFilePath() : QString{};
+    };
+    const QDir app(QCoreApplication::applicationDirPath());
+    for (const auto& candidate : {qEnvironmentVariable("NXRS_BUILD"), chosen, app.filePath("nxrs-engine")}) {
+        nxrsBuild = resolve(candidate);
+        if (!nxrsBuild.isEmpty()) break;
+    }
+    if (nxrsBuild.isEmpty()) return;
+    // engine.json beside it (a release writes it): the contract without starting the engine
+    QFile manifest(QDir(QFileInfo(nxrsBuild).absolutePath()).filePath("engine.json"));
+    if (manifest.open(QIODevice::ReadOnly)) {
+        const auto o = QJsonDocument::fromJson(manifest.readAll()).object();
+        nxrsContract = o["contract"].toInt(); nxrsVersion = o["version"].toString();
+        if (nxrsContract > 0) return;
+    }
+    QProcess process; process.setProcessChannelMode(QProcess::MergedChannels);
+    process.start(nxrsBuild, {"contract"});
+    if (!process.waitForFinished(10000)) { process.kill(); process.waitForFinished(); return; }
+    static const QRegularExpression line("nxrs-contract (\\d+)");
+    const auto match = line.match(QString::fromUtf8(process.readAll()));
+    if (match.hasMatch()) nxrsContract = match.captured(1).toInt();
 }
 Toolchain Toolchain::find(const QString& root) {
     Toolchain t;
@@ -267,6 +310,7 @@ bool Library::load(QString* error) {
     }
     const auto o = doc.object();
     toolRoot = o["toolRoot"].toString(); toolRootChosen = o["toolRootChosen"].toBool(false); outputRoot = o["outputRoot"].toString(); keysPath = o["keysPath"].toString();
+    nxrsBuild = o["nxrsBuild"].toString();
     jobs = qBound(1, o["jobs"].toInt(8), 64);
     viewMode = qBound(0, o["viewMode"].toInt(), 1);
     coverWidth = qBound(130, o["coverWidth"].toInt(180), 240);
@@ -291,7 +335,7 @@ bool Library::save(QString* error) const {
     if (!QDir().mkpath(QFileInfo(path).absolutePath())) return fail(error, "Cannot create the library directory.");
     QJsonArray entries;
     for (const auto& g : games) entries.append(g.json());
-    QJsonObject o{{"schema", 1}, {"games", entries}, {"toolRoot", toolRoot}, {"toolRootChosen", toolRootChosen}, {"outputRoot", outputRoot}, {"keysPath", keysPath}, {"jobs", jobs},
+    QJsonObject o{{"schema", 1}, {"games", entries}, {"toolRoot", toolRoot}, {"toolRootChosen", toolRootChosen}, {"outputRoot", outputRoot}, {"keysPath", keysPath}, {"nxrsBuild", nxrsBuild}, {"jobs", jobs},
         {"viewMode", viewMode}, {"coverWidth", coverWidth}, {"showBackground", showBackground},
         {"colorMode", colorMode}, {"accentColor", accentColor}, {"buttonLayout", buttonLayout},
         {"geometry", QString::fromLatin1(geometry.toBase64())}, {"dockState", QString::fromLatin1(dockState.toBase64())}};
@@ -314,7 +358,9 @@ QString Library::importBuild(const Game& game) {
     for(auto& existing:games) {
         if(!game.source.isEmpty()&&samePath(existing.source,game.source)&&!existing.hasBuild()) {
             existing.buildDir=game.buildDir;existing.outputName=game.outputName;
-            existing.builtSource=game.builtSource;existing.buildIncomplete=false;existing.renderer=game.renderer;
+            existing.builtSource=game.builtSource;existing.buildIncomplete=false;existing.renderer=game.renderer;existing.engine=game.engine;
+            existing.builtUpdate=game.builtUpdate;
+            for(const auto& update:game.updates){bool known=false;for(const auto& have:existing.updates)known=known||samePath(have.path,update.path);if(!known)existing.updates.append(update);}
             if(existing.cover.isEmpty())existing.cover=game.cover;
             return existing.id;
         }
@@ -521,6 +567,65 @@ Game gameFromSource(const QString& source, const QString& outputRoot) {
     g.buildDir = QDir(base).filePath(g.outputName);
     return g;
 }
+// The package a build reads its data from, as its data folder's marker names it (empty: none, or a folder build).
+static QString sourceOfBuild(const QString& dataDir) {
+    QFile marker(QDir(dataDir).filePath("romfs.nup"));
+    if (marker.open(QIODevice::ReadOnly)) {
+        const QString source = QString::fromUtf8(marker.readLine()).trimmed();
+        if (!source.isEmpty()) return source;
+    }
+    QFile nspMarker(QDir(dataDir).filePath("romfs.nsp"));
+    // SWRNSP2: an encrypted package, or one that holds the game with its update; the package path is line 2 in both
+    if (nspMarker.open(QIODevice::ReadOnly) && QByteArrayList{"SWRNSP1", "SWRNSP2"}.contains(nspMarker.readLine().trimmed()))
+        return QString::fromUtf8(nspMarker.readLine()).trimmed();
+    return {};
+}
+bool builtWithNxrs(const QString& buildDir, const QString& outputName) {
+    if (buildDir.isEmpty() || outputName.isEmpty()) return false;
+    const QDir dir(buildDir);
+    for (const auto& build : dir.entryList({outputName + "_build*"}, QDir::Dirs | QDir::NoDotAndDotDot))
+        if (QFileInfo(dir.filePath(build + "/gen/nxrs.gen.key")).isFile()) return true;
+    return false;
+}
+QString buildFolderFor(const QString& buildDir, const QString& engine) {
+    QString base = QDir::fromNativeSeparators(buildDir);
+    while (base.endsWith('/')) base.chop(1);
+    if (base.endsWith(nxrsFolderSuffix)) base.chop(QString(nxrsFolderSuffix).size());
+    return engine == engineNxrs ? base + nxrsFolderSuffix : base;
+}
+bool setGameEngine(Game& game, const QString& engine) {
+    const QString next = engine == engineNxrs ? engineNxrs : engineTurbo;
+    if (game.engine == next) return false;
+    game.engine = next;
+    if (game.buildDir.isEmpty()) return true;
+    game.buildDir = buildFolderFor(game.buildDir, next);
+    // what that folder holds (if anything) is read back: its source and its update from the data folder's marker
+    game.buildIncomplete = false; game.builtUpdate.clear();
+    game.builtSource = QFileInfo(game.executable()).isFile() ? sourceOfBuild(game.dataDir()) : QString{};
+    adoptBuiltUpdate(game);
+    return true;
+}
+QStringList nxrsBuildArguments(const Game& game, const QString& keys, int jobs) {
+    QStringList arguments{"build", QDir::toNativeSeparators(game.source), "--outdir", QDir::toNativeSeparators(game.buildDir),
+        "-o", game.outputName, "--jobs", QString::number(qBound(1, game.workers ? game.workers : jobs, 64)), "--machine"};
+    const QString update = game.updateToken();
+    if (update == "none") arguments << "--no-update";
+    else if (!update.isEmpty()) arguments << "--update" << QDir::toNativeSeparators(update);
+    if (!keys.isEmpty() && QFileInfo(keys).isFile()) arguments << "--keys" << QDir::toNativeSeparators(keys);
+    return arguments;
+}
+QStringList nxrsUpdateInfoArguments(const Game& game, const QString& keys, const QStringList& packages) {
+    QStringList arguments{"update-info", "--game", QDir::toNativeSeparators(game.source)};
+    if (!keys.isEmpty() && QFileInfo(keys).isFile()) arguments << "--keys" << QDir::toNativeSeparators(keys);
+    for (const auto& package : packages) arguments << QDir::toNativeSeparators(package);
+    return arguments;
+}
+QStringList nxrsDlcSyncArguments(const Game& game, const QString& keys) {
+    QStringList arguments{"dlc", "sync", "--datadir", QDir::toNativeSeparators(game.dataDir())};
+    if (!keys.isEmpty() && QFileInfo(keys).isFile()) arguments << "--keys" << QDir::toNativeSeparators(keys);
+    for (const auto& package : game.dlc) arguments << QDir::toNativeSeparators(package);
+    return arguments;
+}
 bool gameFromExecutable(const QString& path, Game* game, QString* error) {
     if (!QFileInfo(path).isFile()) return fail(error, "The executable does not exist.");
     Game g;
@@ -529,15 +634,9 @@ bool gameFromExecutable(const QString& path, Game* game, QString* error) {
     if (QString(executableSuffix).size() && g.title.endsWith(executableSuffix, Qt::CaseInsensitive)) g.title.chop(QString(executableSuffix).size());
     g.outputName = g.title; g.buildDir = QFileInfo(path).absolutePath();
     if (!g.hasBuild()) return fail(error, "A native build needs its executable, matching code module, and _data folder together.");
-    QFile marker(QDir(g.dataDir()).filePath("romfs.nup"));
-    if (marker.open(QIODevice::ReadOnly)) g.source = QString::fromUtf8(marker.readLine()).trimmed();
-    if (g.source.isEmpty()) {
-        QFile nspMarker(QDir(g.dataDir()).filePath("romfs.nsp"));
-        // SWRNSP2: an encrypted package, or one that holds the game with its update; the package path is line 2 in both
-        if (nspMarker.open(QIODevice::ReadOnly) && QByteArrayList{"SWRNSP1", "SWRNSP2"}.contains(nspMarker.readLine().trimmed()))
-            g.source = QString::fromUtf8(nspMarker.readLine()).trimmed();
-        adoptBuiltUpdate(g);   // a build with an update of its own package brings the update along
-    }
+    g.source = sourceOfBuild(g.dataDir());
+    adoptBuiltUpdate(g);   // a build with an update of its own package brings the update along
+    g.engine = builtWithNxrs(g.buildDir, g.outputName) ? engineNxrs : engineTurbo;
     g.builtSource = g.source; g.renderer = readRenderer(g.iniPath());
     for (const auto& name : {"icon.jpg", "icon.png", "icon_AmericanEnglish.dat"}) {
         const QString icon = QDir(g.dataDir()).filePath(name);

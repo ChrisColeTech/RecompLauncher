@@ -440,6 +440,67 @@ private slots:
         const auto game=gameFromSource(path);QCOMPARE(game.format(),QString("DIRECT NSP"));QVERIFY(inPlacePackage(path));
         LibraryFilter filter;filter.source=1;QVERIFY(filter.matches(game));
     }
+    void engineChoicePerGame(){
+        QTemporaryDir tmp;const QString source=tmp.filePath("Kart [v0].nsp");writeFile(source,"PFS0");
+        Game game=gameFromSource(source);QCOMPARE(game.engine,QString(engineTurbo));QVERIFY(!game.nxrs());
+        // a library from before the choice: every game is Turbo's; the choice round-trips
+        QCOMPARE(Game::fromJson({{"id","x"},{"title","Old"}}).engine,QString(engineTurbo));
+        QCOMPARE(Game::fromJson({{"id","x"},{"title","Odd"},{"engine","something"}}).engine,QString(engineTurbo));
+        const QString turboDir=game.buildDir;
+        QVERIFY(setGameEngine(game,engineNxrs));QVERIFY(game.nxrs());QCOMPARE(game.buildDir,turboDir+" [nxrs]");QVERIFY(!game.hasBuild());
+        QVERIFY(!setGameEngine(game,engineNxrs));QCOMPARE(Game::fromJson(game.json()).engine,QString(engineNxrs));
+        QCOMPARE(buildFolderFor(game.buildDir+"/",engineNxrs),turboDir+" [nxrs]");
+        // an nxrs build in its folder: recognized on import and after switching back and forth
+        for(const auto& path:{game.executable(),game.codeModule(),game.buildDir+"/"+game.outputName+"_build/gen/nxrs.gen.key"})writeFile(path,"x");
+        writeFile(game.dataDir()+"/romfs.nsp","SWRNSP2\n"+QDir::toNativeSeparators(source).toUtf8()+"\nkeys k\n");
+        QVERIFY(builtWithNxrs(game.buildDir,game.outputName));QVERIFY(!builtWithNxrs(turboDir,game.outputName));
+        QVERIFY(setGameEngine(game,engineTurbo));QCOMPARE(game.buildDir,turboDir);QVERIFY(!game.hasBuild());
+        QVERIFY(setGameEngine(game,engineNxrs));QVERIFY2(game.hasBuild(),"the nxrs folder's build counts again");
+        Game imported;QString error;QVERIFY2(gameFromExecutable(game.executable(),&imported,&error),qPrintable(error));
+        QVERIFY(imported.nxrs());QVERIFY(samePath(imported.source,source));
+        Library library(tmp.filePath("library.json"));Game unbuilt=gameFromSource(source);QVERIFY(library.add(unbuilt));
+        QCOMPARE(library.importBuild(imported),unbuilt.id);QVERIFY(library.games[0].nxrs());QVERIFY(library.games[0].hasBuild());
+        // contract v2 arguments: no Python, no Turbo options
+        game.workers=6;const QString keys=tmp.filePath("prod.keys");
+        auto args=nxrsBuildArguments(game,keys,8);
+        QCOMPARE(args.mid(0,9),QStringList({"build",QDir::toNativeSeparators(source),"--outdir",QDir::toNativeSeparators(game.buildDir),"-o","Kart","--jobs","6","--machine"}));
+        QVERIFY(!args.contains("--keys"));writeFile(keys,"header_key = 00");args=nxrsBuildArguments(game,keys,8);QCOMPARE(args[args.indexOf("--keys")+1],QDir::toNativeSeparators(keys));
+        game.updateChoice="none";QVERIFY(nxrsBuildArguments(game,keys,8).contains("--no-update"));
+        QCOMPARE(nxrsUpdateInfoArguments(game,{},{tmp.filePath("u.nsp")}),QStringList({"update-info","--game",QDir::toNativeSeparators(source),QDir::toNativeSeparators(tmp.filePath("u.nsp"))}));
+        game.dlc={tmp.filePath("d.nsp")};
+        QCOMPARE(nxrsDlcSyncArguments(game,{}),QStringList({"dlc","sync","--datadir",QDir::toNativeSeparators(game.dataDir()),QDir::toNativeSeparators(tmp.filePath("d.nsp"))}));
+        QCOMPARE(BuildManager::program(game,Toolchain{}),QString{});
+        // the toolchain: nxrs-build found as chosen (a file or its folder), its contract from engine.json or from itself
+        Toolchain tools;QVERIFY(!tools.canBuild(engineNxrs));QVERIFY(!tools.problemFor(engineNxrs).isEmpty());
+#ifdef Q_OS_WIN
+        const auto oldBuild=qgetenv("NXRS_BUILD");const bool hadBuild=qEnvironmentVariableIsSet("NXRS_BUILD");
+        const auto restore=qScopeGuard([&]{if(hadBuild)qputenv("NXRS_BUILD",oldBuild);else qunsetenv("NXRS_BUILD");});qunsetenv("NXRS_BUILD");
+        const QString engine=tmp.filePath("engine dev/target/release");QVERIFY(QDir().mkpath(engine));
+        QVERIFY(QFile::copy(QCoreApplication::applicationFilePath(),engine+"/nxrs-build.exe"));
+        tools.findNxrs(engine);QCOMPARE(tools.nxrsBuild,engine+"/nxrs-build.exe");QCOMPARE(tools.nxrsContract,2);   // asked: "contract"
+        QVERIFY2(tools.canBuild(engineNxrs),qPrintable(tools.nxrsProblem()));QCOMPARE(BuildManager::program(game,tools),tools.nxrsBuild);
+        writeFile(engine+"/engine.json","{\"contract\": 1, \"engine\": \"nxrs\", \"version\": \"0.0.1\"}");
+        tools.findNxrs(engine+"/nxrs-build.exe");QCOMPARE(tools.nxrsContract,1);QCOMPARE(tools.nxrsVersion,QString("0.0.1"));QVERIFY(tools.nxrsProblem().contains("contract 1"));
+        tools.findNxrs(tmp.filePath("nowhere"));QVERIFY(tools.nxrsBuild.isEmpty());
+#endif
+    }
+    void nxrsEngineAnswersUpdatesAndDlc(){
+#ifdef Q_OS_WIN
+        // this test binary stands in for nxrs-build: see main() below
+        QTemporaryDir tmp;Game game=builtGame(tmp);game.engine=engineNxrs;game.source=tmp.filePath("Game.nsp");writeFile(game.source,"PFS0");
+        Toolchain tools;tools.nxrsBuild=QCoreApplication::applicationFilePath();tools.nxrsContract=2;tools.keys=tmp.filePath("prod.keys");writeFile(tools.keys,"header_key = 00");
+        UpdateProbe probe;QString error;QSignalSpy found(&probe,&UpdateProbe::finished);
+        QVERIFY2(probe.start(game,tools,{tmp.filePath("Update.nsp"),tmp.filePath("other game.nsp")},&error),qPrintable(error));
+        QVERIFY(found.wait(15000));QCOMPARE(found[0][1].value<QVector<GameUpdate>>().size(),1);
+        QCOMPARE(found[0][2].toStringList(),QStringList("other game.nsp: this update is for another game"));
+        game.dlc={tmp.filePath("Booster pack.nsp"),tmp.filePath("refused.nsp")};
+        DlcInstaller installer;QSignalSpy synced(&installer,&DlcInstaller::finished);
+        QVERIFY2(installer.start(game,tools,&error),qPrintable(error));QVERIFY(synced.wait(15000));
+        QCOMPARE(synced[0][2].toStringList(),QStringList("refused.nsp: the ticket is bound to one console"));
+        QCOMPARE(readDlcManifest(game.dataDir()).size(),1);
+        Toolchain none;none.keys=tools.keys;QVERIFY(!installer.start(game,none,&error));QVERIFY(error.contains("nxrs-build"));
+#endif
+    }
     void toolEnvironmentCarriesKeys(){
         Toolchain tools;tools.keys="D:/Keys/prod.keys";
         QCOMPARE(tools.environment().value("SWR_PROD_KEYS"),tools.keys);
@@ -448,6 +509,28 @@ private slots:
 int main(int argc,char** argv) {
     // copied into fixture tool directories to exercise executable probes without another Python installation
     if(argc>1&&QByteArray(argv[1])=="-c")return 0;
+    // ...and nxrs-build (contract v2): contract, update-info --game <game> [--keys k] <packages>, dlc sync --datadir <d> [--keys k] <packages>
+    if(argc==2&&QByteArray(argv[1])=="contract"){printf("nxrs-contract 2\n");fflush(stdout);return 0;}
+    if(argc>3&&QByteArray(argv[1])=="update-info"){
+        int failed=0;
+        for(int i=4;i<argc;++i){
+            if(QByteArray(argv[i])=="--keys"){++i;continue;}
+            if(QByteArray(argv[i]).contains("other game")){printf("UPDATE error: other game.nsp: this update is for another game\n");failed=1;}
+            else printf("UPDATE\t%s\t0100aaaa0000c000\t262144\t1.1.1\n",argv[i]);
+        }
+        fflush(stdout);return failed;
+    }
+    if(argc>4&&QByteArray(argv[1])=="dlc"&&QByteArray(argv[2])=="sync"){
+        QFile manifest(QDir(QString::fromLocal8Bit(argv[4])).filePath("dlc.manifest"));if(!manifest.open(QIODevice::WriteOnly|QIODevice::Truncate))return 3;
+        int failed=0;
+        for(int i=5;i<argc;++i){
+            if(QByteArray(argv[i])=="--keys"){++i;continue;}
+            const QString package=QString::fromLocal8Bit(argv[i]);
+            if(package.contains("refused")){printf("DLC error: refused.nsp: the ticket is bound to one console\n");failed=1;continue;}
+            manifest.write(("0100152000023001 65536 data "+package+"\n").toUtf8());printf("DLC: installed 0100152000023001 v65536\n");
+        }
+        fflush(stdout);return failed;
+    }
     // ...and the engine's --update-info (updateProbeAsksTheEngine): every package but "other game" is an update 1.1.1
     if(argc>4&&QByteArray(argv[1])=="-u"&&QByteArray(argv[4])=="--update-info"){
         int failed=0;

@@ -74,6 +74,8 @@ Select the game, then **Game → Install Updates…** to open its Updates window
 - **Renderer**: Vulkan by default, OpenGL as an alternative, per game in properties → **Runtime**.
 - **Controller buttons**: Settings → **Controller** chooses Switch (by position, the default; Circle = A on a
   PlayStation pad) or Xbox (by label, Cross = A); properties → **Runtime** can override it per game.
+- **Engine** (Windows): Properties → **Build** → **Engine** chooses Turbo (the default) or the nxrs engine per game;
+  each builds into its own folder, so both builds can exist ([details](docs/LAUNCHER.md#engines-turbo-and-nxrs)).
 - **Settings** (bottom right) has the theme and accent color, the default build folder and worker count.
   The **Engine ready** badge next to it tells you if a build tool is missing.
 

@@ -150,6 +150,14 @@ def main():
                                    capture_output=True, text=True, timeout=30)
             if probe.returncode not in (0, 1) or 'hactool' not in (probe.stdout + probe.stderr).lower():
                 raise RuntimeError('Bundled hactool did not start')
+        # the nxrs engine, when the release has it: nxrs-build answers the launcher's contract and finds, relocated,
+        # its engine libraries and (gnullvm) the bundled llvm-mingw; --build-runtime checks both and builds nothing
+        nxrs = root / package.NXRS_ENGINE / 'nxrs-build.exe'
+        if win and nxrs.is_file():
+            if 'nxrs-contract %d' % package.NXRS_CONTRACT not in run([nxrs, 'contract'], temp, env):
+                raise RuntimeError('Bundled nxrs-build does not answer the launcher contract')
+            if (root / package.NXRS_ENGINE / package.NXRS_GNU[0]).is_file():   # (MSVC needs the machine's Visual Studio)
+                print('nxrs-build (llvm-mingw): ' + run([nxrs, '--build-runtime'], temp, dict(env, NXRS_TOOLCHAIN='gnu')).strip())
         run([python, '-I', '-c', 'from compression import zstd; import ctypes, ssl, multiprocessing'], temp, env)
         # Switch 2 ZBIC-compressed NSO (Ocarina of Time): the bundled engine + Python decode it and pass its hash check
         zbic_nso = temp / 'zbic-main.nso'

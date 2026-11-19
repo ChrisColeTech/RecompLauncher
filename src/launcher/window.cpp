@@ -163,10 +163,12 @@ Window::Window(const QString& file,const QString& root,bool isDemo):library(file
         }
         console->appendPlainText("\n"+detail);buildDock->setWindowTitle(okay?"Build output — complete":"Build output — stopped");
         progress->hide();jobLabel->setText(okay?"Build complete — ready to play":"Build stopped — see output");
-        refreshLibrary();emit smokeFinished(okay);
-        if(closing)QTimer::singleShot(0,this,&QWidget::close);
-        // a fresh build gets the game's DLC put (back) into its data folder
-        else if(okay){const auto* built=library.find(id);if(built&&!built->dlc.isEmpty())startDlcSync(id,DlcBuilt);}
+        refreshLibrary();
+        if(closing){emit smokeFinished(okay);QTimer::singleShot(0,this,&QWidget::close);return;}
+        // a fresh build gets the game's DLC put (back) into its data folder; --build waits for that too
+        const auto* built=library.find(id);
+        if(okay&&built&&!built->dlc.isEmpty()&&startDlcSync(id,DlcBuilt)){buildDlcPending=true;return;}
+        emit smokeFinished(okay);
     });
     connect(&updateProbe,&UpdateProbe::output,console,&QPlainTextEdit::appendPlainText);
     connect(&updateProbe,&UpdateProbe::finished,this,[this](const QString& id,const QVector<GameUpdate>& found,const QStringList& errors){
@@ -194,6 +196,7 @@ Window::Window(const QString& file,const QString& root,bool isDemo):library(file
         for(const auto& package:game->dlc){bool found=false;for(const auto& title:installed)found=found||samePath(title.source,package);if(found)kept<<package;}
         for(const auto& title:installed)titles<<title.titleId.toUpper()+(title.version?QString(" v%1").arg(title.version):QString{});
         game->dlc=kept;save();refreshLibrary();
+        if(dlcReason==DlcBuilt&&buildDlcPending){buildDlcPending=false;emit smokeFinished(errors.isEmpty());}
         if(dlcDialog){dlcDialog->setBusy(false);dlcDialog->setGame(*game);}
         if(!errors.isEmpty()){jobLabel->setText("DLC was not installed — see the message");dlcReport("DLC could not be installed",errors.join("\n\n"),true);return;}
         jobLabel->setText(installed.isEmpty()?"DLC removed":QString("DLC installed — %1 title%2").arg(installed.size()).arg(installed.size()==1?"":"s"));
@@ -370,7 +373,7 @@ void Window::refreshLibrary(){
         item->setData(Qt::AccessibleDescriptionRole,g->format()+", "+g->renderer);
         item->setSizeHint({library.coverWidth,GameCard::heightFor(library.coverWidth)});
         item->setToolTip(g->title+"\n"+status+"\n"+displayPath(g->buildDir));gallery->addItem(item);
-        auto state=cardState(*g,running.contains(g->id),builder.busy()&&builder.gameId()==g->id,builder.busy(),tools.canBuild());
+        auto state=cardState(*g,running.contains(g->id),builder.busy()&&builder.gameId()==g->id,builder.busy(),tools.canBuild(g->engine));
         if(demo)state.actionEnabled=false;
         auto* card=new GameCard(*g,state,library.coverWidth);cards.insert(g->id,card);gallery->setItemWidget(item,card);
         if(state.building)card->setBuildProgress(buildPhase,buildCurrent,buildTotal);
@@ -397,11 +400,20 @@ void Window::selectGame(const QString& id){
     refreshSelection();
 }
 void Window::selectTitle(const QString& title){for(const auto& game:library.games)if(game.title.compare(title,Qt::CaseInsensitive)==0){selectGame(game.id);return;}}
+bool Window::setEngine(const QString& engine){
+    auto* game=selected();if(!game||demo||(engine!=engineTurbo&&engine!=engineNxrs))return false;
+    if(running.contains(game->id)||(builder.busy()&&builder.gameId()==game->id))return false;
+    if(setGameEngine(*game,engine)){save();refreshTools();refreshLibrary();}
+    return true;
+}
+void Window::setNxrsBuild(const QString& path){
+    library.nxrsBuild=path.isEmpty()?QString{}:QFileInfo(path).absoluteFilePath();save();refreshTools();refreshLibrary();
+}
 void Window::refreshSelection(){
     if(!selectionLabel)return;
     const auto* g=selected();const bool exists=g;const bool playing=exists&&running.contains(g->id);const bool building=exists&&builder.busy()&&builder.gameId()==g->id;
     playAction->setEnabled(exists&&!demo&&g->hasBuild()&&!playing&&!building);
-    buildAction->setEnabled(exists&&!demo&&!builder.busy()&&!playing&&g->sourceAvailable()&&tools.canBuild()&&!g->hasBuild());
+    buildAction->setEnabled(exists&&!demo&&!builder.busy()&&!playing&&g->sourceAvailable()&&tools.canBuild(g->engine)&&!g->hasBuild());
     stopAction->setEnabled(building||playing);stopAction->setText(building?"Cancel build":"Stop");
     propertiesAction->setEnabled(exists);buildOptionsAction->setEnabled(exists&&!playing&&!building);removeAction->setEnabled(exists&&!playing&&!building);
     installDlcAction->setEnabled(exists&&!demo);   // the DLC window opens read-only for a game that is running or building
@@ -612,13 +624,17 @@ void Window::setAppearance(const QString& mode,const QString& accent){
 }
 
 void Window::refreshTools(){
-    tools=Toolchain::find(library.toolRoot);tools.keys=library.keysPath;dotnetReady=false;const int generation=++toolsGeneration;
+    tools=Toolchain::find(library.toolRoot);tools.keys=library.keysPath;tools.findNxrs(library.nxrsBuild);dotnetReady=false;const int generation=++toolsGeneration;
     const auto state=[](const QString& p){return p.isEmpty()?QString("Missing"):QDir::toNativeSeparators(p);};
-    healthText=QString("Python: %1\nGCC: %2\nRuntime: %3\nKeys: %4\n.NET 10: checking…").arg(state(tools.python),state(tools.compiler),state(tools.runtime),state(tools.keys));
-    const bool ready=tools.canBuild();
+    const QString nxrs=tools.nxrsBuild.isEmpty()?QString("Missing"):QDir::toNativeSeparators(tools.nxrsBuild)
+        +QString(" (contract %1%2)").arg(tools.nxrsContract).arg(tools.nxrsVersion.isEmpty()?QString{}:", "+tools.nxrsVersion);
+    healthText=QString("Turbo\nPython: %1\nGCC: %2\nRuntime: %3\n\nnxrs engine\nnxrs-build: %5\n\nKeys: %4\n.NET 10: checking…").arg(state(tools.python),state(tools.compiler),state(tools.runtime),state(tools.keys),nxrs);
+    // ready when the engines the library's games use can build (Turbo for an empty library)
+    bool turboUsed=library.games.isEmpty(),nxrsUsed=false;for(const auto& g:library.games)(g.nxrs()?nxrsUsed:turboUsed)=true;
+    const bool ready=(!turboUsed||tools.canBuild())&&(!nxrsUsed||tools.canBuild(engineNxrs));
     toolStatus->setProperty("badge",ready?"ok":"error");
     toolStatus->setText(ready?"Engine ready":"Setup needed");
-    toolStatus->setToolTip(ready?displayPath(tools.root)+"\nClick for details":tools.problem()+"\nClick for details");
+    toolStatus->setToolTip(ready?displayPath(tools.root)+"\nClick for details":toolProblem()+"\nClick for details");
     style()->unpolish(toolStatus);style()->polish(toolStatus);
     emit toolsChanged();
     if(tools.dotnet.isEmpty()){healthText.replace("checking…","Not found");emit toolsChanged();return;}
@@ -651,6 +667,16 @@ bool Window::editGame(Game& game,int tab,bool adding){
     auto* name=new QLineEdit(game.outputName);name->setReadOnly(!adding);build->addRow("Executable name",name);
     auto* workers=new QSpinBox;workers->setRange(0,64);workers->setSpecialValueText("Use default");workers->setValue(game.workers);build->addRow("Compiler workers",workers);
     auto* optimization=new QComboBox;optimization->addItems({"O0 — no optimization","O1 — quick build","O2 — balanced (recommended)","O3 — maximum optimization"});optimization->setCurrentIndex(game.optimization);build->addRow("Optimization",optimization);
+    auto* engine=new QComboBox;engine->addItem("Turbo — Switch2RECOMP",QString(engineTurbo));engine->addItem("nxrs engine — nxrs-build",QString(engineNxrs));
+    engine->setCurrentIndex(game.nxrs()?1:0);
+    engine->setToolTip("The engine that builds this game. Each engine builds into its own folder (the nxrs one ends in [nxrs]), so both builds can exist; switch back any time.");
+    build->addRow("Engine",engine);
+    // nxrs compiles at one measured flag set: the optimization level is Turbo's
+    const auto engineChanged=[engine,optimization]{optimization->setEnabled(engine->currentData().toString()!=engineNxrs);};engineChanged();
+    connect(engine,qOverload<int>(&QComboBox::currentIndexChanged),&dialog,[engine,destination,engineChanged]{
+        destination->setText(QDir::toNativeSeparators(buildFolderFor(destination->text().trimmed(),engine->currentData().toString())));
+        engineChanged();
+    });
     auto* runtime=tabForm(tabs,"Runtime");auto* renderer=new QComboBox;renderer->addItem("Vulkan — native NVN","vulkan");renderer->addItem("OpenGL — compatibility","opengl");renderer->setCurrentIndex(qMax(0,renderer->findData(game.renderer)));runtime->addRow("Graphics backend",renderer);
     auto* buttonLayout=new QComboBox;buttonLayout->addItem("Use default — "+buttonLayoutName(library.buttonLayout),QString());addButtonLayouts(buttonLayout);
     buttonLayout->setCurrentIndex(qMax(0,buttonLayout->findData(game.buttonLayout)));runtime->addRow("Controller layout",buttonLayout);
@@ -677,6 +703,7 @@ bool Window::editGame(Game& game,int tab,bool adding){
         }
         game.title=title->text().trimmed();game.source=source->text().trimmed().isEmpty()?QString{}:QFileInfo(QDir::fromNativeSeparators(source->text().trimmed())).absoluteFilePath();
         game.buildDir=QFileInfo(QDir::fromNativeSeparators(destination->text().trimmed())).absoluteFilePath();
+        setGameEngine(game,engine->currentData().toString());
         if(adding)game.outputName=outputNameFor(name->text());game.workers=workers->value();game.optimization=optimization->currentIndex();game.renderer=renderer->currentData().toString();game.buttonLayout=buttonLayout->currentData().toString();
         game.cover=QDir::fromNativeSeparators(cover->text().trimmed());game.background=QDir::fromNativeSeparators(background->text().trimmed());
         if(dlc)game.dlc=dlc->packages();
@@ -694,6 +721,10 @@ void Window::showProperties(int tab){
         bool dlcChanged=false;
         if(auto* current=library.find(id)){
             current->title=edited.title;current->source=edited.source;current->buildDir=edited.buildDir;
+            if(current->engine!=edited.engine){   // the other engine's folder, and what is built there
+                current->engine=edited.engine;current->builtSource=edited.builtSource;current->builtUpdate=edited.builtUpdate;
+                current->buildIncomplete=edited.buildIncomplete;current->updates=edited.updates;
+            }
             current->renderer=edited.renderer;current->workers=edited.workers;current->optimization=edited.optimization;
             current->cover=edited.cover;current->background=edited.background;
             dlcChanged=current->dlc!=edited.dlc;current->dlc=edited.dlc;
@@ -719,6 +750,8 @@ void Window::showControllerSettings(){showSettings(2);}
 void Window::showSettings(int initialTab){
     QDialog dialog(this);dialog.setWindowTitle("nxrs — Settings");dialog.resize(690,440);auto* layout=new QVBoxLayout(&dialog);auto* tabs=new QTabWidget;layout->addWidget(tabs,1);
     auto* toolkit=tabForm(tabs,"Engine");auto* root=new QLineEdit(library.toolRoot);root->setPlaceholderText("The engine bundled with this launcher");toolkit->addRow("Engine folder",browseField(root,&dialog,"Choose the vendored engine folder (optional)",{},true));
+    auto* nxrsBuild=new QLineEdit(QDir::toNativeSeparators(library.nxrsBuild));nxrsBuild->setPlaceholderText("The nxrs engine bundled with this launcher");
+    toolkit->addRow("nxrs-build",browseField(nxrsBuild,&dialog,"Choose nxrs-build (a development engine)",QString("nxrs-build (nxrs-build%1);;All files (*)").arg(executableSuffix)));
     auto* health=textLabel(healthText,"Muted");health->setWordWrap(true);health->setTextInteractionFlags(Qt::TextSelectableByMouse);toolkit->addRow(health);
     connect(this,&Window::toolsChanged,&dialog,[this,health]{health->setText(healthText);});
     // the setup guide is a source-checkout document; a release has nothing to set up and does not ship docs/
@@ -742,13 +775,16 @@ void Window::showSettings(int initialTab){
     auto* location=textLabel("Library file:\n"+displayPath(library.path),"Muted");location->setWordWrap(true);location->setTextInteractionFlags(Qt::TextSelectableByMouse);appearance->addRow(location);
     auto* buttons=new QDialogButtonBox(QDialogButtonBox::Ok|QDialogButtonBox::Cancel);layout->addWidget(buttons);connect(buttons,&QDialogButtonBox::rejected,&dialog,&QDialog::reject);
     connect(buttons,&QDialogButtonBox::accepted,&dialog,[&]{
-        if(builder.busy()&&(root->text()!=library.toolRoot||output->text()!=library.outputRoot||workers->value()!=library.jobs)){QMessageBox::information(&dialog,"Build in progress","Engine/build defaults cannot change during a build. Appearance can still be changed.");return;}
+        const QString chosenNxrs=QDir::fromNativeSeparators(nxrsBuild->text().trimmed());
+        if(builder.busy()&&(root->text()!=library.toolRoot||output->text()!=library.outputRoot||workers->value()!=library.jobs||chosenNxrs!=library.nxrsBuild)){QMessageBox::information(&dialog,"Build in progress","Engine/build defaults cannot change during a build. Appearance can still be changed.");return;}
         const auto selectedRoot=QDir::fromNativeSeparators(root->text().trimmed());
         if(!selectedRoot.isEmpty()&&selectedRoot!=library.toolRoot&&!QFileInfo(QDir(selectedRoot).filePath("switchrecomp.py")).isFile()){QMessageBox::warning(&dialog,"Engine not found","Select the vendored engine folder (the one containing switchrecomp.py).");return;}
         if(selectedRoot.isEmpty()){library.toolRoot=Toolchain::discoverRoot();library.toolRootChosen=false;}   // empty = the bundled engine
         else if(const QString chosen=QFileInfo(selectedRoot).absoluteFilePath();chosen!=library.toolRoot){
             library.toolRoot=chosen;library.toolRootChosen=QDir::cleanPath(chosen)!=QDir::cleanPath(Toolchain::discoverRoot());
         }
+        if(!chosenNxrs.isEmpty()&&chosenNxrs!=library.nxrsBuild&&!QFileInfo::exists(chosenNxrs)){QMessageBox::warning(&dialog,"nxrs-build not found","Select nxrs-build"+QString(executableSuffix)+" or the folder that holds it.");return;}
+        library.nxrsBuild=chosenNxrs.isEmpty()?QString{}:QFileInfo(chosenNxrs).absoluteFilePath();
         library.outputRoot=QDir::fromNativeSeparators(output->text().trimmed());library.jobs=workers->value();library.showBackground=backdrop->isChecked();
         library.colorMode=mode->currentData().toString();library.accentColor=accent->currentData().toString();
         const QString layout=buttonLayout->currentData().toString();
@@ -787,8 +823,9 @@ void Window::cardAction(const QString& id){selectGame(id);if(demo)return;auto* g
 void Window::play(){
     auto* game=selected();if(!game||demo||!game->hasBuild()||running.contains(game->id)||(builder.busy()&&builder.gameId()==game->id))return;
     if(inPlacePackage(game->source)&&!game->sourceAvailable()){message("Source unavailable","Reconnect the drive containing the source package, or update the source in Properties and rebuild.",true);return;}
-    if(game->renderer=="vulkan"&&(!dotnetReady||tools.python.isEmpty())){message("Shader tools need setup","Vulkan requires Python and .NET 10. Check File > Settings > Engine.",true);return;}
-    if(game->renderer=="vulkan"&&!QFileInfo(QDir(game->buildDir).filePath("tools/nxshader/nxs_live.py")).exists()){
+    // Turbo's Vulkan renderer translates shaders while it runs with Python and .NET; nxrs translated them in the build
+    if(!game->nxrs()&&game->renderer=="vulkan"&&(!dotnetReady||tools.python.isEmpty())){message("Shader tools need setup","Vulkan requires Python and .NET 10. Check File > Settings > Engine.",true);return;}
+    if(!game->nxrs()&&game->renderer=="vulkan"&&!QFileInfo(QDir(game->buildDir).filePath("tools/nxshader/nxs_live.py")).exists()){
         message("Shader tools are missing","Rebuild this game with the current engine to stage its Vulkan shader tools before playing.",true);return;
     }
     // add-on content: the data folder has to hold the game's DLC list before the game starts
@@ -827,9 +864,16 @@ bool Window::eventFilter(QObject* watched,QEvent* event){
     return QMainWindow::eventFilter(watched,event);
 }
 
+QString Window::toolProblem() const {
+    bool turboUsed=library.games.isEmpty(),nxrsUsed=false;for(const auto& g:library.games)(g.nxrs()?nxrsUsed:turboUsed)=true;
+    QStringList problems;
+    if(turboUsed&&!tools.canBuild())problems<<"Turbo: "+tools.problem();
+    if(nxrsUsed&&!tools.canBuild(engineNxrs))problems<<"nxrs engine: "+tools.nxrsProblem();
+    return problems.join("\n\n");
+}
 void Window::showToolPopup(){
     if(toolPopup){toolPopup->close();toolPopup.clear();}
-    const bool ready=tools.canBuild();
+    const QString problem=toolProblem();const bool ready=problem.isEmpty();
     auto* frame=new QFrame(this,Qt::Popup|Qt::FramelessWindowHint);
     toolPopup=frame;
     frame->setAttribute(Qt::WA_TranslucentBackground);
@@ -846,7 +890,7 @@ void Window::showToolPopup(){
     if(ready){
         auto* body=new QLabel(healthText);body->setObjectName("Muted");body->setWordWrap(true);body->setTextInteractionFlags(Qt::TextSelectableByMouse);layout->addWidget(body);
     } else {
-        auto* body=new QLabel(tools.problem());body->setWordWrap(true);body->setTextInteractionFlags(Qt::TextSelectableByMouse);layout->addWidget(body);
+        auto* body=new QLabel(problem);body->setWordWrap(true);body->setTextInteractionFlags(Qt::TextSelectableByMouse);layout->addWidget(body);
         auto* divider=new QFrame;divider->setObjectName("FilterDivider");divider->setFixedHeight(1);layout->addWidget(divider);
         auto* health=new QLabel(healthText);health->setObjectName("Muted");health->setWordWrap(true);health->setTextInteractionFlags(Qt::TextSelectableByMouse);layout->addWidget(health);
     }
