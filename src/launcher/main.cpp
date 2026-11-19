@@ -15,12 +15,12 @@
 #include <QFile>
 
 // Earlier builds kept the library and installed keys under RecompLauncher/RecompLauncher and, before that,
-// RecompLauncher/SwitchRecompLauncher (org/app). Copy the newest of those once into nxrs/nxrs; the old folders
+// RecompLauncher/SwitchRecompLauncher (org/app). Copy the newest of those once into nxrs; the old folders
 // are left untouched.
 static void migrateLegacyData() {
     const QDir current(QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation));
     if (QFileInfo::exists(current.filePath("library.json"))) return;
-    for (const char* old : {"../../RecompLauncher/RecompLauncher", "../../RecompLauncher/SwitchRecompLauncher"}) {
+    for (const char* old : {"../RecompLauncher/RecompLauncher", "../RecompLauncher/SwitchRecompLauncher"}) {
         const QDir legacy(current.absoluteFilePath(QString::fromLatin1(old)));
         if (!legacy.exists()) continue;
         QDirIterator it(legacy.absolutePath(), QDir::Files | QDir::Hidden | QDir::NoDotAndDotDot, QDirIterator::Subdirectories);
@@ -36,7 +36,7 @@ static void migrateLegacyData() {
 
 int main(int argc, char** argv) {
     QApplication app(argc, argv);
-    QApplication::setOrganizationName("nxrs");
+    QApplication::setOrganizationName(QString{});   // no organization level: the data folder is %LOCALAPPDATA%\nxrs
     QApplication::setApplicationName("nxrs");
     migrateLegacyData();
     QApplication::setApplicationVersion(NXRS_VERSION);

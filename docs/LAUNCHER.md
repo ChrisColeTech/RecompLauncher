@@ -200,7 +200,7 @@ Direct-launch interpreter discovery changes in
 `third_party/Switch2RECOMP/runtime/nvn_hook.c` require a later runtime rebuild/deployment.
 
 The default library is `library.json` under Qt's local application-data directory for
-`nxrs/nxrs` (normally `%LOCALAPPDATA%\nxrs\nxrs`; the folder of the earlier name,
+`nxrs` (normally `%LOCALAPPDATA%\nxrs`; the folder of the earlier name,
 `%LOCALAPPDATA%\RecompLauncher\RecompLauncher`, or the older `SwitchRecompLauncher`, is copied over once on first
 start and left in place). It stores paths,
 display metadata, per-game build options, view preferences, and window/dock layout. Writes are atomic.
