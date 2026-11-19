@@ -19,6 +19,12 @@ ENGINE = ROOT / 'third_party' / 'Switch2RECOMP'   # engine submodule: get_deps.p
 sys.path.insert(0, str(ENGINE / 'tool'))
 import get_deps as deps
 
+# archive.ubuntu.com answers Python's default "Python-urllib" user agent with 403; every fetch, including
+# get_deps.fetch's, goes through this opener
+_opener = urllib.request.build_opener()
+_opener.addheaders = [('User-Agent', 'nxrs-release-deps')]
+urllib.request.install_opener(_opener)
+
 ASSETS = {
     'windows': {
         'python': ('https://api.nuget.org/v3-flatcontainer/python/3.14.9/python.3.14.9.nupkg', 'sha256', '7cd9d07aec975212344dc6f7e45019378cf6775dd564181e269010a1eddaaec7'),
