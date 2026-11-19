@@ -1,4 +1,4 @@
-// RecompLauncher - native game library and build launcher.
+// nxrs - native game library and build launcher.
 // The vendored Switch2RECOMP engine keeps its AGPL-3.0 notices under third_party/Switch2RECOMP.
 #include "window.h"
 #include "theme.h"
@@ -14,32 +14,37 @@
 #include <QDirIterator>
 #include <QFile>
 
-// Earlier builds were named SwitchRecompLauncher and kept the library and installed keys under
-// <org>/SwitchRecompLauncher. Copy that folder once into <org>/RecompLauncher; the old one is left untouched.
+// Earlier builds kept the library and installed keys under RecompLauncher/RecompLauncher and, before that,
+// RecompLauncher/SwitchRecompLauncher (org/app). Copy the newest of those once into nxrs/nxrs; the old folders
+// are left untouched.
 static void migrateLegacyData() {
     const QDir current(QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation));
-    const QDir legacy(current.absoluteFilePath("../SwitchRecompLauncher"));
-    if (!legacy.exists() || QFileInfo::exists(current.filePath("library.json"))) return;
-    QDirIterator it(legacy.absolutePath(), QDir::Files | QDir::Hidden | QDir::NoDotAndDotDot, QDirIterator::Subdirectories);
-    while (it.hasNext()) {
-        const QString source = it.next();
-        const QString target = current.filePath(legacy.relativeFilePath(source));
-        QDir().mkpath(QFileInfo(target).absolutePath());
-        if (!QFileInfo::exists(target)) QFile::copy(source, target);
+    if (QFileInfo::exists(current.filePath("library.json"))) return;
+    for (const char* old : {"../../RecompLauncher/RecompLauncher", "../../RecompLauncher/SwitchRecompLauncher"}) {
+        const QDir legacy(current.absoluteFilePath(QString::fromLatin1(old)));
+        if (!legacy.exists()) continue;
+        QDirIterator it(legacy.absolutePath(), QDir::Files | QDir::Hidden | QDir::NoDotAndDotDot, QDirIterator::Subdirectories);
+        while (it.hasNext()) {
+            const QString source = it.next();
+            const QString target = current.filePath(legacy.relativeFilePath(source));
+            QDir().mkpath(QFileInfo(target).absolutePath());
+            if (!QFileInfo::exists(target)) QFile::copy(source, target);
+        }
+        return;
     }
 }
 
 int main(int argc, char** argv) {
     QApplication app(argc, argv);
-    QApplication::setOrganizationName("RecompLauncher");
-    QApplication::setApplicationName("RecompLauncher");
+    QApplication::setOrganizationName("nxrs");
+    QApplication::setApplicationName("nxrs");
     migrateLegacyData();
-    QApplication::setApplicationVersion(RECOMPLAUNCHER_VERSION);
+    QApplication::setApplicationVersion(NXRS_VERSION);
     QApplication::setStyle("Fusion");
     Theme::apply(app);
     QFont font("Segoe UI", 9); app.setFont(font);
     QApplication::setWindowIcon(Theme::appIcon());
-    QCommandLineParser parser;     parser.setApplicationDescription("RecompLauncher — native game library and build launcher");
+    QCommandLineParser parser;     parser.setApplicationDescription("nxrs — native game library and build launcher");
     parser.addHelpOption(); parser.addVersionOption();
     parser.addOption({"root", "Vendored engine (Switch2RECOMP) directory", "directory"});
     parser.addOption({"library", "Use a specific library file", "file"});

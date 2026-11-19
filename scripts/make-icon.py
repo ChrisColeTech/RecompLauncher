@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# RecompLauncher - native game library and build launcher.
+# nxrs - native game library and build launcher.
 """Render the application icon: a dark controller silhouette on the lime accent square.
 Writes src/launcher/icons/app.ico (16-256 px, embedded in the Windows exe) and app.png (256 px, window icon on
 every platform). Developer tool; needs Pillow (pip install pillow). Run after changing the design and commit both files."""

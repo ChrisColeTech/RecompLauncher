@@ -1,4 +1,4 @@
-# RecompLauncher Turbo launcher
+# nxrs Turbo launcher
 
 It is a static recompiler and desktop build/library utility, not an emulator product. Add your own
 game dumps, build them, then launch the finished games from the same library. No per-game desktop shortcuts
@@ -8,12 +8,12 @@ Start with the [README walkthrough](../README.md#add-build-play). No games, keys
 
 ## Start it
 
-For all-in-one releases, open `RecompLauncher.exe` (Windows) or
-`./RecompLauncher` (Linux) at the top of the extracted folder. Download bundles from [the latest Turbo release](https://github.com/ChrisColeTech/RecompLauncher/releases/latest).
+For all-in-one releases, open `nxrs.exe` (Windows) or
+`./nxrs` (Linux) at the top of the extracted folder. Download bundles from [the latest Turbo release](https://github.com/ChrisColeTech/nxrs/releases/latest).
 The following path is for a Windows developer checkout:
 
 ```powershell
-& ".\bin\launcher\RecompLauncher.exe"
+& ".\bin\launcher\nxrs.exe"
 ```
 
 The entire `bin/launcher/` directory contains the Qt DLLs and plugins needed by the frontend. Do not move
@@ -56,7 +56,7 @@ Also:
 - **Play** checks that the data folder holds exactly the listed DLC and installs or removes what differs first.
 - **Properties → DLC** shows the same list; an entry removed there (right-click → **Remove**, or Delete) is
   uninstalled on **OK**.
-- `RecompLauncher --select-title <game> --install-dlc <package>` and `--remove-dlc <package>` (both repeatable) do
+- `nxrs --select-title <game> --install-dlc <package>` and `--remove-dlc <package>` (both repeatable) do
   the window's Add and Remove without any dialog; the exit code is 0 or 1.
 - DLC installed from the command line (`switchrecomp.py --install-dlc`) shows up in the list by itself.
 - On Linux the engine needs `hactool` on the PATH for DLC, as for NSP builds.
@@ -200,8 +200,9 @@ Direct-launch interpreter discovery changes in
 `third_party/Switch2RECOMP/runtime/nvn_hook.c` require a later runtime rebuild/deployment.
 
 The default library is `library.json` under Qt's local application-data directory for
-`RecompLauncher/RecompLauncher` (normally `%LOCALAPPDATA%\RecompLauncher\RecompLauncher`; the older
-`SwitchRecompLauncher` folder is copied over once on first start and left in place). It stores paths,
+`nxrs/nxrs` (normally `%LOCALAPPDATA%\nxrs\nxrs`; the folder of the earlier name,
+`%LOCALAPPDATA%\RecompLauncher\RecompLauncher`, or the older `SwitchRecompLauncher`, is copied over once on first
+start and left in place). It stores paths,
 display metadata, per-game build options, view preferences, and window/dock layout. Writes are atomic.
 An unreadable/corrupt library is not silently overwritten.
 
@@ -233,14 +234,14 @@ create a venv or download packages. The launcher uses the same interpreter order
 & ".\scripts\build-launcher.bat" -QtPrefix "C:\Qt\6.8.3\msvc2022_64"
 ```
 
-Output: `bin/launcher/RecompLauncher.exe`; full build/test/deploy output: `logs/launcher_release.log`.
+Output: `bin/launcher/nxrs.exe`; full build/test/deploy output: `logs/launcher_release.log`.
 
 Linux uses Qt 6.8.3 `gcc_64` with Widgets, Test and Image Formats, CMake, Ninja and a native C++ toolchain:
 
 ```sh
 export SWR_QT_PREFIX=/path/to/Qt/6.8.3/gcc_64
 sh scripts/build-launcher.sh
-./bin/launcher-linux/RecompLauncher
+./bin/launcher-linux/nxrs
 ```
 
 Both frontend builds need an existing toolkit runtime to compile games. See
@@ -297,4 +298,4 @@ by `scripts/setup.bat`; .NET 10 is required for the live Vulkan shader translato
 tools without requiring the development-only `build/nvn/libnvn.a` to exist on the player's machine.
 
 Do not package personal `library.json` files, games, saves, extracted data, shader caches, captures, or logs.
-This native Qt launcher is `RecompLauncher.exe`.
+This native Qt launcher is `nxrs.exe`.

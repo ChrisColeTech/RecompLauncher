@@ -1,4 +1,4 @@
-// RecompLauncher - native game library and build launcher.
+// nxrs - native game library and build launcher.
 // The vendored Switch2RECOMP engine keeps its AGPL-3.0 notices under third_party/Switch2RECOMP.
 #include "dlcpanel.h"
 #include "updatepanel.h"
@@ -32,7 +32,7 @@ private slots:
         QCOMPARE(changed.count(),1);QVERIFY(popup.search->text().isEmpty());QCOMPARE(popup.state->currentIndex(),0);QCOMPARE(popup.source->currentIndex(),0);QCOMPARE(popup.sort->currentIndex(),0);
     }
     void titleBarHitRegions(){
-        QMainWindow window;window.setWindowTitle("RecompLauncher");auto* bar=new TitleBar(&window);window.setMenuWidget(bar);
+        QMainWindow window;window.setWindowTitle("nxrs");auto* bar=new TitleBar(&window);window.setMenuWidget(bar);
         bar->menuBar()->addMenu("&File");bar->menuBar()->addMenu("&Help");window.setCentralWidget(new QWidget);window.resize(900,500);window.show();QVERIFY(QTest::qWaitForWindowExposed(&window));
         auto centre=[](QWidget* w){return w->geometry().center();};
         QCOMPARE(bar->hitTest(centre(bar->button(CaptionButton::Minimize))),TitleBar::MinimizeButton);

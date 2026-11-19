@@ -1,4 +1,4 @@
-// RecompLauncher - native game library and build launcher.
+// nxrs - native game library and build launcher.
 // The vendored Switch2RECOMP engine keeps its AGPL-3.0 notices under third_party/Switch2RECOMP.
 #include "library.h"
 #include <QCoreApplication>
@@ -41,7 +41,7 @@ QString pythonTool(const QStringList& roots, const QStringList& choices, const Q
 }
 
 // Two layouts, checked in this order:
-//  release:  <release>/RecompLauncher(.exe), <release>/engine (switchrecomp.py, recomp_cli.py) and the shared tools in
+//  release:  <release>/nxrs(.exe), <release>/engine (switchrecomp.py, recomp_cli.py) and the shared tools in
 //            <release>/toolchain (python, gcc, dotnet, shader-tools); Linux keeps the bundled shared libraries in <release>/lib
 //  checkout: <project>/third_party/Switch2RECOMP with .venv, third_party/gcc, bin/launcher at <project>
 // Anything else (an engine folder chosen in the settings) is searched on its own.
@@ -167,7 +167,7 @@ Game Game::fromJson(const QJsonObject& o) {
 
 bool Toolchain::canBuild() const { return problem().isEmpty(); }
 QString Toolchain::problem() const {
-    if (root.isEmpty()) return "The engine was not found. It ships in the engine folder beside RecompLauncher (third_party/Switch2RECOMP in a source checkout); set it in File > Settings > Engine if you moved it.";
+    if (root.isEmpty()) return "The engine was not found. It ships in the engine folder beside nxrs (third_party/Switch2RECOMP in a source checkout); set it in File > Settings > Engine if you moved it.";
     if (!QFileInfo(QDir(root).filePath("switchrecomp.py")).isFile()) return "The engine folder is incomplete: switchrecomp.py is missing. Extract the release again or set it in File > Settings > Engine.";
     if (python.isEmpty()) return "Python is missing or SWR_PYTHON is invalid. Check SWR_PYTHON, .venv/venv, or the portable Python bundle.";
     if (compiler.isEmpty()) return "GCC is missing. Extract the complete engine bundle or run the setup script.";

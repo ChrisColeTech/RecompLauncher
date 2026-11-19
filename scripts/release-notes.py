@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# RecompLauncher - native game library and build launcher.
+# nxrs - native game library and build launcher.
 """Write release notes from the commits since the previous release: launcher commits, then the engine commits the
 submodule pin moved across. Needs full history (actions/checkout fetch-depth: 0, which also unshallows submodules).
 

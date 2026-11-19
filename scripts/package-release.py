@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-# RecompLauncher - native game library and build launcher.
+# nxrs - native game library and build launcher.
 # The vendored Switch2RECOMP engine keeps its AGPL-3.0 notices under third_party/Switch2RECOMP.
 """Stage an allowlisted, relocatable end-user release and archive it with a SHA-256 manifest.
 
 Layout (the launcher finds engine/ and toolchain/ beside its own executable):
-  RecompLauncher(.exe)  the Qt launcher with its Qt/MSVC DLLs and plugin folders (Linux: lib/, plugins/, qt.conf)
+  nxrs(.exe)  the Qt launcher with its Qt/MSVC DLLs and plugin folders (Linux: lib/, plugins/, qt.conf)
   engine/               only what a game build reads: the recompiler modules, recomp_cli.py, the prebuilt native
                         runtime, the runtime header/helper the generated C includes, the shader helper (+ hactool)
   toolchain/            python, gcc, dotnet, shader-tools
@@ -23,7 +23,7 @@ import tarfile
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
-NAME = 'RecompLauncher'   # archive, top-level folder and launcher executable name
+NAME = 'nxrs'   # archive, top-level folder and launcher executable name
 ENGINE = ROOT / 'third_party/Switch2RECOMP'   # engine submodule in the checkout
 RELEASE_ENGINE, TOOLCHAIN, LEGAL = Path('engine'), Path('toolchain'), Path('legal')
 TOOLS = ('python', 'gcc', 'dotnet', 'shader-tools')

@@ -1,6 +1,6 @@
 @echo off
 setlocal
-rem RecompLauncher - native game library and build launcher.
+rem nxrs - native game library and build launcher.
 rem The vendored Switch2RECOMP engine keeps its AGPL-3.0 notices under third_party/Switch2RECOMP.
 rem One-time setup: Python venv with pinned build tools, plus GCC validation.
 rem Safe to re-run: installed components are reused.

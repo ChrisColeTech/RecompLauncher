@@ -154,7 +154,7 @@ Switch 2 specifics: nothing in the DLC path is nx2-specific (the lookup is by ti
 `control_metadata.h:251` notes Switch 2 upgrade packs are themselves distributed as AddOnContent titles, which
 doesn't affect a Switch 1 title. MK8D is a Switch 1 program throughout.
 
-## 3. Recommended design for RecompLauncher + Switch2RECOMP
+## 3. Recommended design for nxrs + Switch2RECOMP
 
 ### 3.1 What DLC means here (the model)
 
@@ -320,7 +320,7 @@ are the general path for DLC that ships real content.
   `buildmanager.cpp`); its output goes to the build console.
 - DLC found in the data folder but missing from `Game.dlc` (installed from the command line, or the library file
   was written by an older launcher since) is added to the list when Properties or Play looks at the game.
-- `RecompLauncher --select-title <game> --install-dlc <package>` and `--remove-dlc <package>` are the window's Add
+- `nxrs --select-title <game> --install-dlc <package>` and `--remove-dlc <package>` are the window's Add
   and Remove without dialogs (exit code 0 or 1); `--show-menu game`, `--show-dlc` and
   `--show-properties --properties-tab 4` with `--screenshot` show the new UI.
 - Releases ship the engine's `dlc.py` (`scripts/package-release.py`).

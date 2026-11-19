@@ -10,8 +10,8 @@ SDL2, and the shared libraries discovered during packaging.
 A release is laid out for the person running it, not as a copy of this repository:
 
 ```text
-RecompLauncher-<platform>-x64/
-  RecompLauncher.exe | RecompLauncher   the launcher: double-click it
+nxrs-<platform>-x64/
+  nxrs.exe | nxrs   the launcher: double-click it
     Windows: + Qt and app-local MSVC DLLs, platforms/ imageformats/ styles/ ... (windeployqt output)
     Linux:   + lib/ (Qt, SDL2, ICU/OpenSSL and other non-glibc libraries), plugins/, qt.conf
   engine/       only what a game build reads:
@@ -32,7 +32,7 @@ The launcher looks for `engine/` and `toolchain/` beside its own executable firs
 
 A release carries no source beyond what a game build reads: no runtime C sources (the runtime ships prebuilt),
 engine tests, docs or developer tools, no launcher sources or scripts, and no `vc_redist.x64.exe` (the MSVC DLLs
-are app-local). The complete source is the `RecompLauncher-source.tar.gz` published with every release.
+are app-local). The complete source is the `nxrs-source.tar.gz` published with every release.
 Packaging enforces this: `engine/` holds only allowlisted files tracked at the pinned engine commit, and the
 release root holds only the launcher, its Qt runtime and the three folders above.
 
@@ -42,8 +42,8 @@ On Linux the launcher binary carries `DT_RPATH=$ORIGIN/lib`, so it starts withou
 
 ## Run a release
 
-- Windows x64: extract the entire ZIP into a writable folder, then open `RecompLauncher.exe`.
-- Linux x64: extract the tar.gz, then run `./RecompLauncher` (or open it from the file manager).
+- Windows x64: extract the entire ZIP into a writable folder, then open `nxrs.exe`.
+- Linux x64: extract the tar.gz, then run `./nxrs` (or open it from the file manager).
   The release baseline is Ubuntu 24.04 (glibc 2.39) or a compatible newer desktop.
   An X11 session or XWayland is required. Extract onto a filesystem that supports
   Unix permissions and symbolic links.
@@ -141,7 +141,7 @@ python third_party/Switch2RECOMP/tools/build_nvn.py --jobs 8
 python src/recomp_cli.py --build-runtime --target win64 --backend win32 --cc "$pwd\build\release-deps\gcc\Library\bin\x86_64-w64-mingw32-gcc.exe"
 ./scripts/build-launcher.ps1 -QtPrefix C:/Qt/6.8.3/msvc2022_64
 python scripts/package-release.py --deps build/release-deps --launcher bin/launcher --qt C:/Qt/6.8.3/msvc2022_64
-python scripts/smoke-release.py dist/RecompLauncher-windows-x64.zip
+python scripts/smoke-release.py dist/nxrs-windows-x64.zip
 ```
 
 Linux:
@@ -152,7 +152,7 @@ python3 third_party/Switch2RECOMP/tools/build_nvn.py --linux --jobs 8
 python3 src/recomp_cli.py --build-runtime --target linux --backend x11 --cc gcc
 sh scripts/build-launcher.sh
 python3 scripts/package-release.py --deps build/release-deps --launcher bin/launcher-linux --qt "$SWR_QT_PREFIX"
-python3 scripts/smoke-release.py dist/RecompLauncher-linux-x64.tar.gz
+python3 scripts/smoke-release.py dist/nxrs-linux-x64.tar.gz
 ```
 
 Packaging refuses to merge into an existing staging directory. Use another `--output`

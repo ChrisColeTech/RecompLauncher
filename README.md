@@ -1,6 +1,6 @@
-# RecompLauncher
+# nxrs
 
-[![Portable release](https://github.com/ChrisColeTech/RecompLauncher/actions/workflows/release.yml/badge.svg?branch=main)](https://github.com/ChrisColeTech/RecompLauncher/actions/workflows/release.yml)
+[![Portable release](https://github.com/ChrisColeTech/nxrs/actions/workflows/release.yml/badge.svg?branch=main)](https://github.com/ChrisColeTech/nxrs/actions/workflows/release.yml)
 [![Engine CI](https://github.com/ChrisColeTech/Switch2RECOMP-turbo/actions/workflows/engine-ci.yml/badge.svg?branch=turbo)](https://github.com/ChrisColeTech/Switch2RECOMP-turbo/actions/workflows/engine-ci.yml)
 A game library for the [Switch2RECOMP](https://github.com/ChrisColeTech/Switch2RECOMP-turbo) static recompiler.
 Add your own Switch game dumps, build them into native Windows or Linux games with one click, and play them
@@ -11,9 +11,9 @@ from the same library.
 ## Download and run
 
 1. Download the zip (Windows) or tar.gz (Linux) from the latest
-   [release](https://github.com/ChrisColeTech/RecompLauncher/releases/latest).
+   [release](https://github.com/ChrisColeTech/nxrs/releases/latest).
 2. Extract the whole archive into a writable folder.
-3. Run `RecompLauncher.exe` (Linux: `./RecompLauncher`).
+3. Run `nxrs.exe` (Linux: `./nxrs`).
 
 Everything a build needs ships in the archive: Python, GCC, .NET and the shader tools. Nothing else to install.
 
@@ -90,7 +90,7 @@ Select the game, then **Game → Install Updates…** to open its Updates window
 ## Building from source
 
 See [docs/DEVELOPING.md](docs/DEVELOPING.md). Release notes for every build are on the
-[releases page](https://github.com/ChrisColeTech/RecompLauncher/releases).
+[releases page](https://github.com/ChrisColeTech/nxrs/releases).
 
 ## License
 

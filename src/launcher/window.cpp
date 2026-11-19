@@ -1,4 +1,4 @@
-// RecompLauncher - native game library and build launcher.
+// nxrs - native game library and build launcher.
 // The vendored Switch2RECOMP engine keeps its AGPL-3.0 notices under third_party/Switch2RECOMP.
 #include "window.h"
 #include "artwork.h"
@@ -130,7 +130,7 @@ QFormLayout* tabForm(QTabWidget* tabs,const QString& name) {
 }
 
 Window::Window(const QString& file,const QString& root,bool isDemo):library(file),builder(this),dlcInstaller(this),updateProbe(this),demo(isDemo) {
-    setWindowTitle("RecompLauncher");resize(1280,800);setMinimumSize(920,600);setAcceptDrops(true);
+    setWindowTitle("nxrs");resize(1280,800);setMinimumSize(920,600);setAcceptDrops(true);
     setDockOptions(QMainWindow::AllowTabbedDocks|QMainWindow::AnimatedDocks);
     QString error;library.load(&error);
     const QString installedKeys=QDir(QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation)).filePath("keys/prod.keys");
@@ -272,7 +272,7 @@ void Window::createMenusAndToolbar(){
     auto* view=menus->addMenu("&View");view->setObjectName("ViewMenu");view->addAction(galleryAction);view->addAction(tableAction);view->addSeparator();view->addAction(filterAction);view->addAction(backgroundAction);
     view->addAction("Refresh library",QKeySequence("F5"),this,[this]{invalidateArtwork();refreshTools();refreshLibrary();});
     view->addSeparator();view->addAction("View console",QKeySequence("Ctrl+L"),this,&Window::showBuildOutput);
-    auto* help=menus->addMenu("&Help");help->addAction("About RecompLauncher",this,[this]{message("RecompLauncher","Build and launch your own game dumps from one library.\nNo games, keys, or firmware are included.\n\nEngine: Switch2RECOMP (AGPL-3.0) — see legal/LICENSE.txt in the release (third_party/Switch2RECOMP/LICENSE.txt in a source checkout).\n\nNative controller input is supported. Vibration and some Switch 2 audio/video features remain incomplete.");});
+    auto* help=menus->addMenu("&Help");help->addAction("About nxrs",this,[this]{message("nxrs","Build and launch your own game dumps from one library.\nNo games, keys, or firmware are included.\n\nEngine: Switch2RECOMP (AGPL-3.0) — see legal/LICENSE.txt in the release (third_party/Switch2RECOMP/LICENSE.txt in a source checkout).\n\nNative controller input is supported. Vibration and some Switch 2 audio/video features remain incomplete.");});
 
     auto* bar=addToolBar("Commands");bar->setObjectName("Commands");bar->setMovable(false);bar->setIconSize({32,32});bar->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
     auto* addButton=new QToolButton;addButton->setObjectName("AddGameButton");addButton->setDefaultAction(addAction);addButton->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);addButton->setIconSize({32,32});
@@ -717,7 +717,7 @@ void Window::showProperties(int tab){
 void Window::showAppearance(){showSettings(3);}
 void Window::showControllerSettings(){showSettings(2);}
 void Window::showSettings(int initialTab){
-    QDialog dialog(this);dialog.setWindowTitle("RecompLauncher — Settings");dialog.resize(690,440);auto* layout=new QVBoxLayout(&dialog);auto* tabs=new QTabWidget;layout->addWidget(tabs,1);
+    QDialog dialog(this);dialog.setWindowTitle("nxrs — Settings");dialog.resize(690,440);auto* layout=new QVBoxLayout(&dialog);auto* tabs=new QTabWidget;layout->addWidget(tabs,1);
     auto* toolkit=tabForm(tabs,"Engine");auto* root=new QLineEdit(library.toolRoot);root->setPlaceholderText("The engine bundled with this launcher");toolkit->addRow("Engine folder",browseField(root,&dialog,"Choose the vendored engine folder (optional)",{},true));
     auto* health=textLabel(healthText,"Muted");health->setWordWrap(true);health->setTextInteractionFlags(Qt::TextSelectableByMouse);toolkit->addRow(health);
     connect(this,&Window::toolsChanged,&dialog,[this,health]{health->setText(healthText);});

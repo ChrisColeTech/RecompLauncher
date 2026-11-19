@@ -12,7 +12,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-REPO = Path(__file__).resolve().parents[1]          # RecompLauncher root (scripts/, bin/, third_party/)
+REPO = Path(__file__).resolve().parents[1]          # nxrs root (scripts/, bin/, third_party/)
 ROOT = REPO / 'third_party' / 'Switch2RECOMP'       # engine submodule
 
 

@@ -1,4 +1,4 @@
-# RecompLauncher - native game library and build launcher.
+# nxrs - native game library and build launcher.
 # Licensed under the GNU Affero General Public License v3.0, see LICENSE.txt and NOTICE.txt.
 name: Portable release
 on:
@@ -131,10 +131,10 @@ jobs:
         run: python scripts/package-release.py --deps build/release-deps --launcher bin/launcher-linux --qt "$QT_ROOT_DIR"
       - name: Test relocated Windows archive
         if: runner.os == 'Windows'
-        run: python scripts/smoke-release.py dist/RecompLauncher-windows-x64.zip
+        run: python scripts/smoke-release.py dist/nxrs-windows-x64.zip
       - name: Test relocated Linux archive
         if: runner.os == 'Linux'
-        run: python scripts/smoke-release.py dist/RecompLauncher-linux-x64.tar.gz
+        run: python scripts/smoke-release.py dist/nxrs-linux-x64.tar.gz
       - uses: actions/upload-artifact@v4
         with:
           name: portable-${{ matrix.platform }}
@@ -198,7 +198,7 @@ jobs:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
           tag="$TAG"
-          prefix=RecompLauncher-source
+          prefix=nxrs-source
           # git archive leaves submodules out; append the pinned engine so the source archive is complete (AGPL)
           git archive --format=tar --prefix="$prefix/" -o release/source.tar "$GITHUB_SHA"
           git -C "$ENGINE" archive --format=tar --prefix="$prefix/$ENGINE/" -o "$PWD/release/engine.tar" HEAD
@@ -208,4 +208,4 @@ jobs:
           (cd release && sha256sum "$prefix.tar.gz" > "$prefix.tar.gz.sha256")
           # changelog: launcher commits since the previous release tag, plus the engine commits the pin moved across
           python3 scripts/release-notes.py --head "$GITHUB_SHA" > "$RUNNER_TEMP/notes.md"
-          gh release create "$tag" release/*.zip release/*.tar.gz release/*.sha256 --target "$GITHUB_SHA" --title "RecompLauncher $VERSION" --notes-file "$RUNNER_TEMP/notes.md" $(case "$VERSION" in *-*) echo --prerelease ;; *) echo --latest ;; esac)
+          gh release create "$tag" release/*.zip release/*.tar.gz release/*.sha256 --target "$GITHUB_SHA" --title "nxrs $VERSION" --notes-file "$RUNNER_TEMP/notes.md" $(case "$VERSION" in *-*) echo --prerelease ;; *) echo --latest ;; esac)

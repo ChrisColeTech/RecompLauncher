@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# RecompLauncher - native game library and build launcher.
+# nxrs - native game library and build launcher.
 # The vendored Switch2RECOMP engine keeps its AGPL-3.0 notices under third_party/Switch2RECOMP.
 """Extract a release away from the checkout, start its launcher with no help (no --root, PATH or LD_LIBRARY_PATH),
 build a synthetic NUP through it, and probe the bundled tools."""

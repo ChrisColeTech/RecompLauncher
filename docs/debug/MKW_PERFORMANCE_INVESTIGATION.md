@@ -101,11 +101,11 @@ For the same optimized path and phase tracing off, the CSV-on run's whole-log-wi
 
 ## Reproduction commands
 
-From `D:\Projects\RecompLauncher`, with no existing game session:
+From `D:\Projects\nxrs`, with no existing game session:
 
 ```powershell
 .\.venv\Scripts\python.exe tools\build_nvn.py --jobs 8
-.\.venv\Scripts\python.exe RecompLauncher.py --build-runtime --target win64 --backend win32 --cc gcc\Library\bin\x86_64-w64-mingw32-gcc.exe
+.\.venv\Scripts\python.exe nxrs.py --build-runtime --target win64 --backend win32 --cc gcc\Library\bin\x86_64-w64-mingw32-gcc.exe
 .\.venv\Scripts\python.exe tools\mkw_probe.py deploy perf-build
 .\.venv\Scripts\python.exe tools\mkw_probe.py verify
 .\.venv\Scripts\python.exe tools\mkw_perf.py warm-race --env 'SWR_FRAME_CSV={run}/frames.csv' --env 'NXRT_VK_PHASES=0'

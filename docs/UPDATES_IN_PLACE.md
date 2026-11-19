@@ -8,7 +8,7 @@ packages, remove them again, and choose which version the game is built with. Th
 ## 1. What an update is here
 
 On a console an update is installed beside the game and applied when the game starts. An emulator does the same
-(section 6). RecompLauncher recompiles the game's code ahead of time, and an update **replaces that code**, so:
+(section 6). nxrs recompiles the game's code ahead of time, and an update **replaces that code**, so:
 
 - **Installing, removing or choosing another update needs the game built again.** The launcher never hides this:
   the card's button turns into **Rebuild** with the status **Update changed**, **Play** is unavailable until the
@@ -37,7 +37,7 @@ the game again to get update 1.1.1 (v262144): an update replaces the game's code
 A game that is running or building opens the window read-only. **Properties → Updates** shows the same list; an
 entry removed there (right-click → Remove, or Delete) leaves on **OK**.
 
-Without dialogs: `RecompLauncher --select-title <game> --install-update <package>` / `--remove-update <package>`
+Without dialogs: `nxrs --select-title <game> --install-update <package>` / `--remove-update <package>`
 (both repeatable), `--update-choice newest|none|<package>`, `--build` (build the selected game and exit),
 `--show-updates` (open the window). Exit code 0 or 1.
 

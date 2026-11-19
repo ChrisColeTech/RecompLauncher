@@ -12,13 +12,13 @@ import unittest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'third_party' / 'Switch2RECOMP' / 'tests'))
 from test_nup import minimal_nso, write_nup
 
-REPO = Path(__file__).resolve().parents[1]          # RecompLauncher root (scripts/, bin/, third_party/)
+REPO = Path(__file__).resolve().parents[1]          # nxrs root (scripts/, bin/, third_party/)
 ROOT = REPO / 'third_party' / 'Switch2RECOMP'       # engine submodule
 
 
 class LauncherWorkflow(unittest.TestCase):
     def test_import_existing_build_without_compiling(self):
-        binary = REPO / 'bin/launcher/RecompLauncher.exe'
+        binary = REPO / 'bin/launcher/nxrs.exe'
         self.assertTrue(binary.is_file(), 'Build the Qt launcher first')
         with tempfile.TemporaryDirectory(prefix='launcher import spaces ') as tmp:
             work = Path(tmp)
@@ -50,7 +50,7 @@ class LauncherWorkflow(unittest.TestCase):
                 self.assertEqual(exe.read_bytes(), b'fixture, never execute')
 
     def test_build_saves_ready_library_entry(self):
-        binary = REPO / 'bin/launcher/RecompLauncher.exe'
+        binary = REPO / 'bin/launcher/nxrs.exe'
         self.assertTrue(binary.is_file(), 'Build the Qt launcher first: scripts/build-launcher.bat')
         (ROOT / 'build').mkdir(parents=True, exist_ok=True)
         with tempfile.TemporaryDirectory(prefix='launcher-', dir=ROOT / 'build') as tmp:

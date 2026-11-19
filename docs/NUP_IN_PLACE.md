@@ -1,6 +1,6 @@
 # Building And Running A NUP In Place
 
-This guide explains direct `.nup` input on Windows and Linux. RecompLauncher materializes the package's small ExeFS for
+This guide explains direct `.nup` input on Windows and Linux. nxrs materializes the package's small ExeFS for
 code translation, but does not expand or copy RomFS. The game continues reading RomFS from the original NUP while it
 runs.
 

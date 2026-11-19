@@ -1,4 +1,4 @@
-# Developing RecompLauncher
+# Developing nxrs
 
 How to build the launcher from source, work on the engine submodule, and run the tests. For using the app, see
 the [README](../README.md); for packaging release bundles, see [RELEASES.md](RELEASES.md).
@@ -26,7 +26,7 @@ test suites build with the launcher.
 the fork's engine enhancements. Clone with submodules:
 
 ```bat
-git clone --recurse-submodules https://github.com/ChrisColeTech/RecompLauncher.git
+git clone --recurse-submodules https://github.com/ChrisColeTech/nxrs.git
 rem or, in an existing clone:
 git submodule update --init
 ```

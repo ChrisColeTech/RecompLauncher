@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# RecompLauncher - native game library and build launcher.
+# nxrs - native game library and build launcher.
 """Entry point for building games and the runtime with the vendored engine.
 
 The vendored Switch2RECOMP project is used as a library; this module is the only

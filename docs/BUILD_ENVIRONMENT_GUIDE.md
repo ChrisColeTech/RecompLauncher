@@ -198,7 +198,7 @@ Verified on 2026-11-14:
 Build the optional NVN layer before rebuilding the Windows runtime:
 
 ```powershell
-Set-Location -LiteralPath "D:\Projects\RecompLauncher"
+Set-Location -LiteralPath "D:\Projects\nxrs"
 & ".\.venv\Scripts\python.exe" third_party/Switch2RECOMP/tools/build_nvn.py --jobs 8
 & ".\scripts\build-runtime.bat"
 ```

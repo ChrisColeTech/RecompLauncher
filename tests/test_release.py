@@ -11,7 +11,7 @@ import unittest
 from unittest.mock import patch
 import zipfile
 
-ROOT = Path(__file__).resolve().parents[1]                    # RecompLauncher checkout
+ROOT = Path(__file__).resolve().parents[1]                    # nxrs checkout
 sys.path.insert(0, str(ROOT / 'third_party' / 'Switch2RECOMP'))  # engine submodule (switchrecomp)
 
 
@@ -75,11 +75,11 @@ class ReleaseChecks(unittest.TestCase):
         clutter = {'windows': ['engine/runtime/gpu.c', 'engine/runtime/edenvk/deps/zstd/lib/zstd.h', 'engine/tests/test_nup.py',
                                'engine/docs/THIRD_PARTY.md', 'engine/tool/get_deps.py', 'engine/tools/s2r_paths.py',
                                'engine/tools/build_nvn.py', 'engine/runtime/vp9/win/libvpx.a', 'engine/tools/nxshader/run_split.py', 'engine/tools/nxshader/xlate_bin/dmsh_xlate',
-                               'engine/LICENSE.txt', 'src/recomp_cli.py', 'scripts/_python.bat', '.gitignore', 'RecompLauncher.cmd',
-                               'vc_redist.x64.exe', 'third_party/Switch2RECOMP/switchrecomp.py', 'bin/launcher/RecompLauncher.exe',
+                               'engine/LICENSE.txt', 'src/recomp_cli.py', 'scripts/_python.bat', '.gitignore', 'nxrs.cmd',
+                               'vc_redist.x64.exe', 'third_party/Switch2RECOMP/switchrecomp.py', 'bin/launcher/nxrs.exe',
                                'docs/RELEASES.md', 'SwitchRecompLauncher.exe'],
-                   'linux': ['engine/runtime/backend_x11.c', 'engine/tools/hactool/hactool.exe', 'RecompLauncher.sh',
-                             'scripts/_env.sh', 'gcc/bin/gcc', 'README.md', 'bin/launcher/RecompLauncher']}
+                   'linux': ['engine/runtime/backend_x11.c', 'engine/tools/hactool/hactool.exe', 'nxrs.sh',
+                             'scripts/_env.sh', 'gcc/bin/gcc', 'README.md', 'bin/launcher/nxrs']}
         for platform, names in clutter.items():
             root = self.bundle(platform); package.validate_contents(root, platform)
             for name in names:
@@ -248,14 +248,14 @@ class ReleaseChecks(unittest.TestCase):
 
     def test_launcher_folder_allowlist(self):
         deploy = self.root / 'deploy'
-        for name in ('RecompLauncher.exe', 'Qt6Core.dll', 'platforms/qwindows.dll', 'imageformats/qwebp.dll',
+        for name in ('nxrs.exe', 'Qt6Core.dll', 'platforms/qwindows.dll', 'imageformats/qwebp.dll',
                      'vc_redist.x64.exe', 'SwitchRecompLauncher.exe', 'launcher.pdb', 'library.json'):
             p = deploy / name; p.parent.mkdir(parents=True, exist_ok=True); p.touch()
         self.assertEqual({p.as_posix() for p in package.launcher_files(deploy, 'windows')},
-                         {'RecompLauncher.exe', 'Qt6Core.dll', 'platforms/qwindows.dll', 'imageformats/qwebp.dll'})
-        (deploy / 'RecompLauncher').touch()
-        self.assertEqual([p.as_posix() for p in package.launcher_files(deploy, 'linux')], ['RecompLauncher'])
-        (deploy / 'RecompLauncher.exe').unlink()
+                         {'nxrs.exe', 'Qt6Core.dll', 'platforms/qwindows.dll', 'imageformats/qwebp.dll'})
+        (deploy / 'nxrs').touch()
+        self.assertEqual([p.as_posix() for p in package.launcher_files(deploy, 'linux')], ['nxrs'])
+        (deploy / 'nxrs.exe').unlink()
         with self.assertRaises(FileNotFoundError): list(package.launcher_files(deploy, 'windows'))
 
     def test_cli_finds_engine_in_release_and_checkout(self):

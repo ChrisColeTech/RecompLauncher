@@ -1,5 +1,5 @@
 @echo off
-rem RecompLauncher - native game library and build launcher.
+rem nxrs - native game library and build launcher.
 rem The vendored Switch2RECOMP engine keeps its AGPL-3.0 notices under third_party/Switch2RECOMP.
 rem CALL this file: select Python without installing anything or changing PATH.
 if defined SWR_PYTHON (

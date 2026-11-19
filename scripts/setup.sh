@@ -1,5 +1,5 @@
 #!/bin/sh
-# RecompLauncher - native game library and build launcher.
+# nxrs - native game library and build launcher.
 # The vendored Switch2RECOMP engine keeps its AGPL-3.0 notices under third_party/Switch2RECOMP.
 # One-time setup: Python venv with pinned build tools, plus GCC validation.
 # Safe to re-run: installed components are reused.

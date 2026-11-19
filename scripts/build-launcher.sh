@@ -1,5 +1,5 @@
 #!/bin/sh
-# RecompLauncher - native game library and build launcher.
+# nxrs - native game library and build launcher.
 # The vendored Switch2RECOMP engine keeps its AGPL-3.0 notices under third_party/Switch2RECOMP.
 
 set -eu

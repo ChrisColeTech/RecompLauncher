@@ -1,6 +1,6 @@
 # Building And Running An NSP In Place
 
-RecompLauncher builds a game straight from its application NSP: **Add game**, pick the `.nsp`, **Build**. ExeFS (the code, tens of MB) is copied into the
+nxrs builds a game straight from its application NSP: **Add game**, pick the `.nsp`, **Build**. ExeFS (the code, tens of MB) is copied into the
 native build; the RomFS stays in the original NSP and is read from there while the game runs.
 
 Three kinds of package work:
