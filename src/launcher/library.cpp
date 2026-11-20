@@ -127,7 +127,7 @@ QString Game::updateToken() const {
 bool Game::sourceAvailable() const { return !source.isEmpty() && QFileInfo::exists(source); }
 QJsonObject Game::json() const {
     return {{"id", id}, {"title", title}, {"source", source}, {"buildDir", buildDir},
-        {"outputName", outputName}, {"cover", cover}, {"background", background}, {"renderer", renderer}, {"buttonLayout", buttonLayout},
+        {"outputName", outputName}, {"cover", cover}, {"background", background}, {"renderer", renderer}, {"buttonLayout", buttonLayout}, {"pauseOnFocusLoss", pauseOnFocusLoss},
         {"workers", workers}, {"optimization", optimization},
         {"builtSource", builtSource}, {"buildIncomplete", buildIncomplete}, {"lastPlayed", lastPlayed.toString(Qt::ISODate)},
         {"lastBuilt", lastBuilt.toString(Qt::ISODate)}, {"dlc", QJsonArray::fromStringList(dlc)},
@@ -144,6 +144,8 @@ Game Game::fromJson(const QJsonObject& o) {
     g.optimization = qBound(0, o["optimization"].toInt(2), 3);
     if (g.renderer != "vulkan" && g.renderer != "opengl") g.renderer = "opengl";
     g.buttonLayout = normalizeButtonLayout(o["buttonLayout"].toString());
+    g.pauseOnFocusLoss = o["pauseOnFocusLoss"].toString();
+    if (g.pauseOnFocusLoss != "0" && g.pauseOnFocusLoss != "1") g.pauseOnFocusLoss.clear();
     g.engine = o["engine"].toString() == engineNxrs ? engineNxrs : engineTurbo;   // absent (an older library): Turbo
     g.builtSource = o["builtSource"].toString();
     g.savesOffered = o["savesOffered"].toString();
@@ -323,6 +325,7 @@ bool Library::load(QString* error) {
     accentColor = o["accentColor"].toString("lime");
     buttonLayout = normalizeButtonLayout(o["buttonLayout"].toString());
     if (buttonLayout.isEmpty()) buttonLayout = "switch";
+    pauseOnFocusLoss = o["pauseOnFocusLoss"].toBool(false);
     geometry = QByteArray::fromBase64(o["geometry"].toString().toLatin1());
     dockState = QByteArray::fromBase64(o["dockState"].toString().toLatin1());
     games.clear();
@@ -340,7 +343,7 @@ bool Library::save(QString* error) const {
     for (const auto& g : games) entries.append(g.json());
     QJsonObject o{{"schema", 1}, {"games", entries}, {"toolRoot", toolRoot}, {"toolRootChosen", toolRootChosen}, {"outputRoot", outputRoot}, {"keysPath", keysPath}, {"nxrsBuild", nxrsBuild}, {"jobs", jobs},
         {"viewMode", viewMode}, {"coverWidth", coverWidth}, {"showBackground", showBackground},
-        {"colorMode", colorMode}, {"accentColor", accentColor}, {"buttonLayout", buttonLayout},
+        {"colorMode", colorMode}, {"accentColor", accentColor}, {"buttonLayout", buttonLayout}, {"pauseOnFocusLoss", pauseOnFocusLoss},
         {"geometry", QString::fromLatin1(geometry.toBase64())}, {"dockState", QString::fromLatin1(dockState.toBase64())}};
     QSaveFile file(path);
     if (!file.open(QIODevice::WriteOnly)) return fail(error, file.errorString());
@@ -854,9 +857,26 @@ bool writeButtonLayout(const QString& ini, const QString& layout, QString* error
     if (layout != "switch" && layout != "xbox") return fail(error, "Unknown controller layout.");
     return writeIniKey(ini, "Controls", "button_layout", layout, error);
 }
-bool writeGameSettings(const Game& game, const QString& launcherLayout, QString* error) {
+bool effectivePauseOnFocusLoss(const Game& game, bool launcherDefault) {
+    return game.pauseOnFocusLoss.isEmpty() ? launcherDefault : game.pauseOnFocusLoss == "1";
+}
+bool writePauseOnFocusLoss(const QString& ini, bool pause, QString* error) {
+    return writeIniKey(ini, "Controls", "pause_on_focus_loss", pause ? "1" : "0", error);
+}
+bool readPauseOnFocusLoss(const QString& ini) {
+    QFile file(ini);
+    bool pause = false;
+    if (!file.open(QIODevice::ReadOnly)) return pause;
+    for (const auto& line : QString::fromUtf8(file.readAll()).split('\n')) {
+        const auto trimmed = line.trimmed();
+        if (trimmed.startsWith("pause_on_focus_loss=")) pause = trimmed.mid(20).trimmed() == "1";
+    }
+    return pause;
+}
+bool writeGameSettings(const Game& game, const QString& launcherLayout, QString* error, bool launcherPause) {
     return writeRenderer(game.iniPath(), game.renderer, error)
-        && writeButtonLayout(game.iniPath(), effectiveButtonLayout(game, launcherLayout), error);
+        && writeButtonLayout(game.iniPath(), effectiveButtonLayout(game, launcherLayout), error)
+        && writePauseOnFocusLoss(game.iniPath(), effectivePauseOnFocusLoss(game, launcherPause), error);
 }
 
 bool LibraryFilter::matches(const Game& game, bool running, bool building) const {

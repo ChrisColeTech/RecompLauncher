@@ -140,6 +140,30 @@ private slots:
          QVERIFY(text.contains("docked=0\r\n")); QVERIFY(text.contains("fullscreen=1")); QVERIFY(text.contains("renderer=vulkan")); QVERIFY(text.contains("settings_version=2"));}
         QVERIFY2(writeDocked(path,true,&error),qPrintable(error)); QVERIFY(readDocked(path));
     }
+    void pauseOnFocusLossIni() {
+        QTemporaryDir tmp;const QString ini=tmp.filePath("Game.ini");
+        // an engine INI with the key under [Controls] already, other lines and CRLF kept
+        writeFile(ini,"; keep\r\n[Display]\r\ndocked=1\r\n[Controls]\r\nbutton_layout=switch\r\npause_on_focus_loss=0\r\n");
+        QVERIFY(!readPauseOnFocusLoss(ini));QString error;
+        QVERIFY2(writePauseOnFocusLoss(ini,true,&error),qPrintable(error));QVERIFY(readPauseOnFocusLoss(ini));
+        QFile f(ini);QVERIFY(f.open(QIODevice::ReadOnly));const QByteArray text=f.readAll();f.close();
+        QCOMPARE(text,QByteArray("; keep\r\n[Display]\r\ndocked=1\r\n[Controls]\r\nbutton_layout=switch\r\npause_on_focus_loss=1\r\n"));
+        // an INI without it (a build from before the option): added under [Controls]; no INI at all: the engine default, off
+        const QString old=tmp.filePath("Old.ini");writeFile(old,"[Controls]\nbutton_layout=xbox\n");
+        QVERIFY(writePauseOnFocusLoss(old,false,&error));QFile o(old);QVERIFY(o.open(QIODevice::ReadOnly));QCOMPARE(o.readAll(),QByteArray("[Controls]\npause_on_focus_loss=0\nbutton_layout=xbox\n"));
+        QVERIFY(!readPauseOnFocusLoss(tmp.filePath("missing.ini")));
+        // the game's own choice over the launcher default; both round-trip through the library
+        Game game;QVERIFY(!effectivePauseOnFocusLoss(game,false));QVERIFY(effectivePauseOnFocusLoss(game,true));
+        game.pauseOnFocusLoss="0";QVERIFY(!effectivePauseOnFocusLoss(game,true));game.pauseOnFocusLoss="1";QVERIFY(effectivePauseOnFocusLoss(game,false));
+        QCOMPARE(Game::fromJson(game.json()).pauseOnFocusLoss,QString("1"));
+        QCOMPARE(Game::fromJson(QJsonObject{{"id","x"},{"pauseOnFocusLoss","maybe"}}).pauseOnFocusLoss,QString());
+        Library library(tmp.filePath("library.json"));library.pauseOnFocusLoss=true;QVERIFY(library.save(&error));
+        Library back(tmp.filePath("library.json"));QVERIFY(back.load(&error));QVERIFY(back.pauseOnFocusLoss);
+        // writeGameSettings (build, Play) writes the effective value with the renderer and the layout
+        game.buildDir=tmp.path();game.outputName="Game";game.pauseOnFocusLoss.clear();
+        QVERIFY2(writeGameSettings(game,"switch",&error,true),qPrintable(error));QVERIFY(readPauseOnFocusLoss(game.iniPath()));
+        QVERIFY(writeGameSettings(game,"switch",&error,false));QVERIFY(!readPauseOnFocusLoss(game.iniPath()));
+    }
     void buttonLayoutIni() {
         QTemporaryDir tmp; const QString path=tmp.filePath("Game.ini");
         // the runtime's own INI: [Controls] already has the key (it writes every key with its default)

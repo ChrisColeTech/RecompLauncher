@@ -689,6 +689,10 @@ bool Window::editGame(Game& game,int tab,bool adding){
     auto* screenMode=new QComboBox;screenMode->addItem("TV mode — full resolution (recommended)",true);screenMode->addItem("Handheld mode — the console's own screen, faster",false);
     screenMode->setCurrentIndex(wasDocked?0:1);screenMode->setEnabled(hasIni);screenMode->setToolTip("TV mode: the game renders as it does docked (Switch 1920x1080, Switch 2 up to 2560x1440 and more). Handheld mode: 1280x720 on a Switch, 1920x1080 on a Switch 2, softer on a monitor but lighter on the GPU. Available once the game is built.");
     runtime->addRow("Screen mode",screenMode);
+    auto* pause=new QCheckBox("Pause the game when its window is in the background");pause->setObjectName("PauseOnFocusLoss");
+    pause->setChecked(effectivePauseOnFocusLoss(game,library.pauseOnFocusLoss));
+    pause->setToolTip("Off (the default): the game keeps running while you use another window, as a PC game does. The default for every game is in Settings > Play.");
+    runtime->addRow("",pause);
     auto* runtimeNote=textLabel("Vulkan needs the bundled shader tools, Python, and .NET 10.\n\nOther runtime options remain in the game's INI. Renderer and screen mode changes are applied when you next play; the controller layout is saved right away (the default is in Settings > Controller).","Muted");runtimeNote->setWordWrap(true);runtime->addRow(runtimeNote);
     auto* openIni=new QPushButton("Open game settings file");openIni->setEnabled(QFileInfo(game.iniPath()).exists());runtime->addRow("",openIni);connect(openIni,&QPushButton::clicked,&dialog,[&game]{QDesktopServices::openUrl(QUrl::fromLocalFile(game.iniPath()));});
     auto* artwork=tabForm(tabs,"Artwork");auto* cover=new QLineEdit(game.cover);auto* background=new QLineEdit(game.background);
@@ -713,6 +717,8 @@ bool Window::editGame(Game& game,int tab,bool adding){
         game.cover=QDir::fromNativeSeparators(cover->text().trimmed());game.background=QDir::fromNativeSeparators(background->text().trimmed());
         if(dlc)game.dlc=dlc->packages();
         if(updates)game.updates=updates->updates();
+        // the same as the launcher default: inherit it; otherwise the game's own choice
+        game.pauseOnFocusLoss=pause->isChecked()==library.pauseOnFocusLoss?QString{}:QString(pause->isChecked()?"1":"0");
         if(hasIni&&screenMode->currentData().toBool()!=wasDocked){QString error;if(!writeDocked(game.iniPath(),screenMode->currentData().toBool(),&error)){QMessageBox::warning(&dialog,"Cannot save game settings",error);return;}}
         dialog.accept();
     });
@@ -740,6 +746,9 @@ void Window::showProperties(int tab){
                 for(const auto& update:current->updates)kept=kept||samePath(update.path,current->updateChoice);
                 if(!kept)current->updateChoice.clear();
             }
+            const bool pauseChanged=effectivePauseOnFocusLoss(*current,library.pauseOnFocusLoss)!=effectivePauseOnFocusLoss(edited,library.pauseOnFocusLoss);
+            current->pauseOnFocusLoss=edited.pauseOnFocusLoss;
+            {QString error;if(pauseChanged&&current->hasBuild()&&!writePauseOnFocusLoss(current->iniPath(),effectivePauseOnFocusLoss(*current,library.pauseOnFocusLoss),&error))message("Cannot save game settings",error,true);}
             const bool layoutChanged=current->buttonLayout!=edited.buttonLayout;current->buttonLayout=edited.buttonLayout;
             // already-built games get the new layout in their INI now, not only at the next Play
             QString error;if(layoutChanged&&current->hasBuild()&&!writeButtonLayout(current->iniPath(),effectiveButtonLayout(*current,library.buttonLayout),&error))
@@ -788,6 +797,10 @@ void Window::showSettings(int initialTab){
     buttonLayout->setCurrentIndex(qMax(0,buttonLayout->findData(library.buttonLayout)));controller->addRow("Button layout",buttonLayout);
     auto* controllerNote=textLabel("Applies to Xbox, PlayStation and other controllers. Switch keeps the Switch pad's positions, so on a PlayStation pad Circle is A and Cross is B. Xbox follows the printed Xbox letters: Cross is A, Square is X.\n\nSaved into every built game that uses the default (a running game switches live). Override it per game in Properties > Runtime; single buttons can be remapped with button_map in the game's INI.","Muted");
     controllerNote->setWordWrap(true);controller->addRow(controllerNote);
+    auto* playTab=new QWidget;auto* play=new QFormLayout(playTab);play->setContentsMargins(18,22,18,20);play->setHorizontalSpacing(15);play->setVerticalSpacing(12);play->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
+    auto* pauseDefault=new QCheckBox("Pause the game when its window is in the background");pauseDefault->setObjectName("PauseOnFocusLossDefault");pauseDefault->setChecked(library.pauseOnFocusLoss);
+    play->addRow(pauseDefault);
+    auto* playNote=textLabel("Off: a game keeps running while you use another window, as a PC game does. Applies to every game that has no choice of its own (Properties > Runtime); built games get it in their settings file right away.","Muted");playNote->setWordWrap(true);play->addRow(playNote);
     auto* appearance=tabForm(tabs,"Appearance");
     auto* mode=new QComboBox;mode->addItem("Dark","dark");mode->addItem("Light","light");mode->setCurrentIndex(library.colorMode=="light"?1:0);appearance->addRow("Color mode",mode);
     auto* accent=new QComboBox;for(const auto& color:Theme::accents())accent->addItem(color.label,color.id);accent->setCurrentIndex(qMax(0,accent->findData(library.accentColor)));appearance->addRow("Accent color",accent);
@@ -818,8 +831,13 @@ void Window::showSettings(int initialTab){
             for(const auto& g:library.games)if(g.buttonLayout.isEmpty()&&g.hasBuild()&&!writeButtonLayout(g.iniPath(),layout,&error))failed++;
             if(failed)message("Cannot save game settings",QString("The controller layout could not be written to %1 game(s): %2\nIt is written again when you play.").arg(failed).arg(error),true);
         }
+        if(pauseDefault->isChecked()!=library.pauseOnFocusLoss){
+            library.pauseOnFocusLoss=pauseDefault->isChecked();int failed=0;QString error;
+            for(const auto& g:library.games)if(g.pauseOnFocusLoss.isEmpty()&&g.hasBuild()&&!writePauseOnFocusLoss(g.iniPath(),library.pauseOnFocusLoss,&error))failed++;
+            if(failed)message("Cannot save game settings",QString("The pause setting could not be written to %1 game(s): %2\nIt is written again when you play.").arg(failed).arg(error),true);
+        }
         backgroundAction->setChecked(library.showBackground);save();refreshTools();refreshSelection();dialog.accept();
-    });tabs->setCurrentIndex(qBound(0,initialTab,3));dialog.exec();setAppearance(library.colorMode,library.accentColor);
+    });tabs->addTab(playTab,"Play");tabs->setCurrentIndex(qBound(0,initialTab,4));dialog.exec();setAppearance(library.colorMode,library.accentColor);
 }
 
 bool Window::importSource(const QString& source,bool interactive,const QString& output){
@@ -864,7 +882,7 @@ void Window::play(){
         const auto answer=QMessageBox::question(this,"Copy saves",QString("The %1 build of “%2” has saves. Copy them into this build before playing?\n\nThis build's save folder is backed up first (save-backup-<time> beside it). Asked once; Game > Copy saves does it later.").arg(other,game->title),QMessageBox::Yes|QMessageBox::No,QMessageBox::No);
         if(answer==QMessageBox::Yes){copySaves(true,false);game=selected();if(!game)return;}
     }
-    QString error;if(!writeGameSettings(*game,library.buttonLayout,&error)){message("Cannot save game settings",error,true);return;}
+    QString error;if(!writeGameSettings(*game,library.buttonLayout,&error,library.pauseOnFocusLoss)){message("Cannot save game settings",error,true);return;}
     QProcess process;process.setProgram(game->executable());process.setWorkingDirectory(game->buildDir);auto env=tools.environment();
     process.setProcessEnvironment(env);qint64 pid=0;if(!process.startDetached(&pid)){message("Could not launch",process.errorString(),true);return;}
     running[game->id]=pid;game->lastPlayed=QDateTime::currentDateTime();save();refreshLibrary();jobLabel->setText("Game launched");

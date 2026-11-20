@@ -189,6 +189,12 @@ on the next launch without discarding other settings. Vulkan needs a runtime bui
 tools, Python, and .NET 10. The launcher checks the latter tools and reports missing setup instead of silently
 launching a Vulkan game with no shader translator.
 
+**Pause the game when its window is in the background** (the engine's `pause_on_focus_loss` key, `[Controls]`):
+a plain checkbox in **Properties → Runtime** per game and in **Settings → Play** as the default for every game without a
+choice of its own. Off by default: a game keeps running while another window has focus, as a PC game does. The
+launcher writes the effective value into the game INI at build and Play, and right away for built games when either
+checkbox changes (`library.json`: `pauseOnFocusLoss`, per game `"0"`/`"1"` or absent to inherit).
+
 **Settings → Controller** sets the default controller button layout, the engine's `button_layout` INI key:
 **Switch** (by position like the Switch pad: right = A, bottom = B; on a PlayStation pad Circle = A, Cross = B) or
 **Xbox** (by the printed Xbox letters: Cross = A, Square = X). **Properties → Runtime → Controller layout** overrides
@@ -289,7 +295,7 @@ Both frontend builds need an existing toolkit runtime to compile games. See
 ## Verification
 
 Contract v2 additions (2026-11-20, lane Q; scratch build of `src/launcher` in a folder of its own, a temporary library):
-`launcher-tests` 32/32 (`nxrsDoctorChecks`: the doctor's format, a failing check, the exit code, through the test
+`launcher-tests` 33/33 (`pauseOnFocusLossIni`; `nxrsDoctorChecks`: the doctor's format, a failing check, the exit code, through the test
 binary standing in for nxrs-build, and the real nxrs-build when `NXRS_DOCTOR_EXE` names it;
 `savesCopyBetweenEngines`: both directions, the backup, Turbo's old `system` folder, nxrs's transaction folders;
 `xciSourceIsAnNxrsGame`), `launcher-ui-tests` 10/10 (the Game menu with **Copy saves**).

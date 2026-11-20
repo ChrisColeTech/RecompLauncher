@@ -43,6 +43,9 @@ struct Game {
     QString engine = engineTurbo;
     bool nxrs() const { return engine == engineNxrs; }
     QString buttonLayout; // Empty inherits the launcher default (Settings > Controller).
+    // The engine's pause_on_focus_loss: "" inherits the launcher default (Settings > Play), "1" pauses the game while
+    // its window is in the background, "0" keeps it running (the engine's default: a PC game, not a console).
+    QString pauseOnFocusLoss;
     QString builtSource;
     QStringList dlc; // Add-on content packages (absolute paths) installed with Game > Install DLC….
     // Updates. An update replaces the game's code, so it is applied by building the game again; its data is then read
@@ -108,6 +111,7 @@ public:
     bool showBackground = true;
     QString colorMode = "dark", accentColor = "lime";
     QString buttonLayout = "switch"; // Default controller layout written into every game's INI.
+    bool pauseOnFocusLoss = false;   // Default pause_on_focus_loss written into every game's INI (off: keep running).
     QByteArray geometry, dockState;
     QVector<Game> games;
 private:
@@ -127,7 +131,11 @@ QString normalizeButtonLayout(const QString& layout);
 QString effectiveButtonLayout(const Game& game, const QString& launcherDefault);
 bool writeButtonLayout(const QString& ini, const QString& layout, QString* error);
 // Everything the launcher owns in a game's INI (renderer + button layout), written at build, play and settings change.
-bool writeGameSettings(const Game& game, const QString& launcherLayout, QString* error);
+bool writeGameSettings(const Game& game, const QString& launcherLayout, QString* error, bool launcherPause = false);
+// pause_on_focus_loss: the game's own choice, else the launcher default; written under [Controls] (the engine's section) as 0 / 1.
+bool effectivePauseOnFocusLoss(const Game& game, bool launcherDefault);
+bool writePauseOnFocusLoss(const QString& ini, bool pause, QString* error);
+bool readPauseOnFocusLoss(const QString& ini);   // false when the INI has no value (the engine's default)
 QString readRenderer(const QString& ini);
 // The engine's docked key: true = TV mode (the game renders for a television: sharper), false = handheld mode. TV mode when the INI has no value.
 bool readDocked(const QString& ini);
