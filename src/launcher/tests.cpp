@@ -184,6 +184,30 @@ private slots:
         QCOMPARE(Game::fromJson(game.json()).hintsBuilt,2);
         game.engine=engineTurbo;game.hintsBuilt=0;QCOMPARE(newDiscoveries(game),0);          // Turbo writes no hints
     }
+    void screenModePerGameOverDefault(){
+        QTemporaryDir tmp;QString error;
+        // like the controller layout: the game's own value, else the launcher default (Settings > Play, TV by default)
+        Game game;game.buildDir=tmp.filePath("build");game.outputName="Game";QVERIFY(QDir().mkpath(game.buildDir));
+        QVERIFY(effectiveDocked(game,true));QVERIFY(!effectiveDocked(game,false));
+        game.screenMode="handheld";QVERIFY(!effectiveDocked(game,true));game.screenMode="tv";QVERIFY(effectiveDocked(game,false));
+        QCOMPARE(normalizeScreenMode("Docked"),QString("tv"));QCOMPARE(normalizeScreenMode("x"),QString());
+        QCOMPARE(Game::fromJson(game.json()).screenMode,QString("tv"));
+        QCOMPARE(Game::fromJson(QJsonObject{{"id","x"},{"screenMode","sideways"}}).screenMode,QString());
+        // writeGameSettings (build, Play) writes the game's own mode over the default; Library::playFor the same
+        game.screenMode="handheld";QVERIFY(writeGameSettings(game,"switch",PlaySettings{},&error));QVERIFY(!readDocked(game.iniPath()));
+        game.screenMode.clear();QVERIFY(writeGameSettings(game,"switch",PlaySettings{},&error));QVERIFY(readDocked(game.iniPath()));
+        Library library(tmp.filePath("library.json"));library.docked=false;QVERIFY(!library.playFor(game).docked);
+        game.screenMode="tv";QVERIFY(library.playFor(game).docked);QVERIFY(!library.playFor(game).pause);
+        // a library from before: a built game whose INI says handheld (Properties wrote it there) keeps it as its own
+        Game old;old.id="old";old.title="Old";old.buildDir=tmp.filePath("old");old.outputName="Old";
+        for(const auto& path:{old.executable(),old.codeModule()})writeFile(path,"x");QVERIFY(QDir().mkpath(old.dataDir()));
+        writeFile(old.iniPath(),"[Display]\ndocked=0\n");
+        QJsonObject entry=old.json();entry.remove("screenMode");
+        writeFile(tmp.filePath("old.json"),QJsonDocument(QJsonObject{{"schema",1},{"games",QJsonArray{entry}}}).toJson());
+        Library before(tmp.filePath("old.json"));QVERIFY2(before.load(&error),qPrintable(error));QCOMPARE(before.games.size(),1);
+        QCOMPARE(before.games[0].screenMode,QString("handheld"));
+        writeFile(old.iniPath(),"[Display]\ndocked=1\n");Library tv(tmp.filePath("old.json"));QVERIFY(tv.load(&error));QCOMPARE(tv.games[0].screenMode,QString());
+    }
     void buttonLayoutIni() {
         QTemporaryDir tmp; const QString path=tmp.filePath("Game.ini");
         // the runtime's own INI: [Controls] already has the key (it writes every key with its default)

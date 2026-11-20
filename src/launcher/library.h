@@ -43,6 +43,8 @@ struct Game {
     QString engine = engineTurbo;
     bool nxrs() const { return engine == engineNxrs; }
     QString buttonLayout; // Empty inherits the launcher default (Settings > Controller).
+    // Screen mode: empty inherits the launcher default (Settings > Play), "tv" (docked=1) or "handheld" (docked=0).
+    QString screenMode;
     QString builtSource;
     QStringList dlc; // Add-on content packages (absolute paths) installed with Game > Install DLC….
     // Updates. An update replaces the game's code, so it is applied by building the game again; its data is then read
@@ -126,6 +128,7 @@ public:
     bool docked = true;
     bool askUser = false;   // Settings > Play: ask_user (off: the first profile plays)
     PlaySettings play() const;
+    PlaySettings playFor(const Game& game) const;   // play() with the game's own screen mode, when it has one
     QByteArray geometry, dockState;
     QVector<Game> games;
 private:
@@ -149,6 +152,9 @@ bool writeGameSettings(const Game& game, const QString& launcherLayout, const Pl
 bool writeMuteOnFocusLoss(const QString& ini, bool mute, QString* error);   // [Controls] mute_on_focus_loss=0 / 1
 bool writePlaySettings(const QString& ini, const PlaySettings& play, QString* error);   // pause, mute, docked, ask_user
 bool readAskUser(const QString& ini);
+// "tv" / "handheld" for those values (and their docked / console spellings); empty otherwise.
+QString normalizeScreenMode(const QString& mode);
+bool effectiveDocked(const Game& game, bool launcherDocked);
 // Execution hints (nxrs): a run that interpreted code the build missed appends it to <data>/discovered.tsv (one entry a
 // line, '#' lines are comments); the next build translates them. Entries in the file, and those since the last build.
 int discoveredCount(const QString& dataDir);

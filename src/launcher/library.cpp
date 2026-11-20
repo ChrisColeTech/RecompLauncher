@@ -127,7 +127,7 @@ QString Game::updateToken() const {
 bool Game::sourceAvailable() const { return !source.isEmpty() && QFileInfo::exists(source); }
 QJsonObject Game::json() const {
     return {{"id", id}, {"title", title}, {"source", source}, {"buildDir", buildDir},
-        {"outputName", outputName}, {"cover", cover}, {"background", background}, {"renderer", renderer}, {"buttonLayout", buttonLayout},
+        {"outputName", outputName}, {"cover", cover}, {"background", background}, {"renderer", renderer}, {"buttonLayout", buttonLayout}, {"screenMode", screenMode},
         {"workers", workers}, {"optimization", optimization},
         {"builtSource", builtSource}, {"buildIncomplete", buildIncomplete}, {"lastPlayed", lastPlayed.toString(Qt::ISODate)},
         {"lastBuilt", lastBuilt.toString(Qt::ISODate)}, {"dlc", QJsonArray::fromStringList(dlc)},
@@ -144,6 +144,7 @@ Game Game::fromJson(const QJsonObject& o) {
     g.optimization = qBound(0, o["optimization"].toInt(2), 3);
     if (g.renderer != "vulkan" && g.renderer != "opengl") g.renderer = "opengl";
     g.buttonLayout = normalizeButtonLayout(o["buttonLayout"].toString());
+    g.screenMode = normalizeScreenMode(o["screenMode"].toString());
     // a per-game "pauseOnFocusLoss" (a launcher of 382ff33 wrote one) is not read: the setting is global, and the next
     // save leaves it out
     g.engine = o["engine"].toString() == engineNxrs ? engineNxrs : engineTurbo;   // absent (an older library): Turbo
@@ -336,6 +337,10 @@ bool Library::load(QString* error) {
     for (const auto& value : o["games"].toArray()) {
         auto game = Game::fromJson(value.toObject());
         adoptBuiltUpdate(game);   // a library written by a launcher from before updates: the build on disk says what it has
+        // a library from before the screen mode was kept here: Properties wrote it straight into the game's INI, so a
+        // handheld choice there is this game's own (TV was the default and stays with the launcher default)
+        if (!value.toObject().contains("screenMode") && game.hasBuild() && QFileInfo(game.iniPath()).isFile() && !readDocked(game.iniPath()))
+            game.screenMode = "handheld";
         if (!game.id.isEmpty() && !game.title.isEmpty() && !find(game.id)) games.append(game);
     }
     return true;
@@ -875,6 +880,17 @@ bool readPauseOnFocusLoss(const QString& ini) {
     return pause;
 }
 PlaySettings Library::play() const { return PlaySettings{pauseOnFocusLoss, muteOnFocusLoss, docked, askUser}; }
+PlaySettings Library::playFor(const Game& game) const { PlaySettings p = play(); p.docked = effectiveDocked(game, docked); return p; }
+QString normalizeScreenMode(const QString& mode) {
+    const QString m = mode.trimmed().toLower();
+    if (m == "tv" || m == "docked") return "tv";
+    if (m == "handheld" || m == "portable") return "handheld";
+    return {};
+}
+bool effectiveDocked(const Game& game, bool launcherDocked) {
+    const QString own = normalizeScreenMode(game.screenMode);
+    return own.isEmpty() ? launcherDocked : own == "tv";
+}
 bool readAskUser(const QString& ini) {
     QFile file(ini);
     bool ask = false;
@@ -917,7 +933,9 @@ bool writePlaySettings(const QString& ini, const PlaySettings& play, QString* er
         && writeDocked(ini, play.docked, error)
         && writeIniKey(ini, "Controls", "ask_user", play.askUser ? "1" : "0", error);
 }
-bool writeGameSettings(const Game& game, const QString& launcherLayout, const PlaySettings& play, QString* error) {
+bool writeGameSettings(const Game& game, const QString& launcherLayout, const PlaySettings& launcherPlay, QString* error) {
+    PlaySettings play = launcherPlay;
+    play.docked = effectiveDocked(game, launcherPlay.docked);   // the game's own screen mode over the launcher default
     return writeRenderer(game.iniPath(), game.renderer, error)
         && writeButtonLayout(game.iniPath(), effectiveButtonLayout(game, launcherLayout), error)
         && writePlaySettings(game.iniPath(), play, error);

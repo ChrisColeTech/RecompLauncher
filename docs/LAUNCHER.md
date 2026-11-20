@@ -191,13 +191,15 @@ tools, Python, and .NET 10. The launcher checks the latter tools and reports mis
 launching a Vulkan game with no shader translator. An nxrs game shows **Vulkan** as fixed text (the only renderer of
 that engine; `renderer=vulkan` is written).
 
-**Settings → Play** holds the player's settings, one value for every game (never per game; `library.json` top
-level), written into each game's INI when a build succeeds, at Play, and into every built game's INI right away when
-one changes:
+**Settings → Play** holds the player's settings (`library.json` top level), written into each game's INI when a build
+succeeds, at Play, and into every built game's INI right away when one changes. The screen mode there is the default:
+**Properties → Runtime → Screen mode** overrides it per game, as Controller layout does ("Use default" follows
+Settings → Play; per game `screenMode` `"tv"` / `"handheld"` in `library.json`, absent = default). The background
+settings and Ask who is playing are global only:
 
 | Setting | INI key | Default |
 |---|---|---|
-| **Screen mode**: TV mode — sharper / Handheld — lighter | `docked` (`[Display]`) | TV mode (`docked=1`) |
+| **Screen mode** (default; per-game override in Properties → Runtime): TV mode — sharper / Handheld — lighter | `docked` (`[Display]`) | TV mode (`docked=1`) |
 | **Pause the game when its window is in the background** | `pause_on_focus_loss` (`[Controls]`) | off: the game keeps running, as a PC game does |
 | **Mute the game when its window is in the background** | `mute_on_focus_loss` (`[Controls]`) | off: the sound goes on |
 | **Ask who is playing (when several profiles exist)** | `ask_user` (`[Controls]`) | off: the first profile plays |
@@ -207,7 +209,8 @@ one changes:
 shows the status **Rebuild for full speed**, and when it exits the status bar says how many new functions were found
 (`library.json` per game `hintsBuilt`: the entries when the last build started).
 
-The screen mode was a per-game choice in Properties → Runtime before; that row is gone. A per-game
+A library from before `screenMode` was stored: a built game whose INI says `docked=0` (the old Properties row wrote it
+there) keeps Handheld as its own choice on load; TV, the old default, follows the launcher default. A per-game
 `pauseOnFocusLoss` written by an earlier launcher is ignored on load and left out at the next save.
 
 **Settings → Controller** sets the default controller button layout, the engine's `button_layout` INI key:
