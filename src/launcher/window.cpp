@@ -216,8 +216,6 @@ Window::Window(const QString& file,const QString& root,bool isDemo):library(file
     auto* poll=new QTimer(this);poll->setInterval(2500);
     connect(poll,&QTimer::timeout,this,[this]{
         if(!demo){const auto detected=findRunningGames(library.games);if(detected!=running){
-            for(auto it=running.cbegin();it!=running.cend();++it)if(!detected.contains(it.key()))if(const auto* g=library.find(it.key()))
-                if(const int n=newDiscoveries(*g))jobLabel->setText(QString("%1: rebuild for full speed (%2 new function%3 found; the next build takes them in)").arg(g->title).arg(n).arg(n==1?"":"s"));
             running=detected;refreshLibrary();}}
     });poll->start();
     refreshTools();refreshLibrary();
@@ -358,7 +356,6 @@ QString Window::statusFor(const Game& g)const{
     if(running.contains(g.id))return "Running";
     if(g.hasBuild()&&g.source.endsWith(".nup",Qt::CaseInsensitive)&&!g.sourceAvailable())return "Source offline";
     if(g.updatePending())return "Update changed — build again";
-    if(newDiscoveries(g))return "Rebuild for full speed";   // the run interpreted code the build missed; the next build takes it in
     return g.hasBuild()?"Ready to play":"Build needed";
 }
 void Window::save(){if(demo)return;QString error;if(!library.save(&error))message("Could not save library",error,true);}
@@ -871,7 +868,7 @@ void Window::startBuild(){
     auto* game=selected();if(!game||demo||running.contains(game->id))return;
     game->outputName=outputNameFor(game->outputName);   // a name from an older library keeps step with what the engine writes
     Game build=*game;build.buttonLayout=effectiveButtonLayout(*game,library.buttonLayout);
-    builder.play=library.play();   // writeGameSettings applies the game's own screen modebuilder.hintsAtStart=discoveredCount(game->dataDir());
+    builder.play=library.play();   // writeGameSettings applies the game's own screen mode
     QString error;if(!builder.start(build,tools,library.jobs,&error)){emit smokeFinished(false);message("Cannot start build",error,true);return;}
     game->buildIncomplete=true;save();console->clear();console->appendPlainText("Source: "+displayPath(game->source)+"\nOutput: "+displayPath(game->buildDir)+"\n");
     buildDock->setWindowTitle("Build output — "+game->title);showBuildOutput();refreshLibrary();
