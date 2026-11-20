@@ -12,6 +12,7 @@ public:
     explicit BuildManager(QObject* parent = nullptr);
     bool start(const Game& game, const Toolchain& tools, int jobs, QString* error);
     PlaySettings play;   // Settings > Play, written into the game's INI when the build succeeds
+    int hintsAtStart = 0; // discovered.tsv entries when the build started: the build takes them in
     void cancel();
     bool busy() const { return active; }
     QString gameId() const { return game.id; }

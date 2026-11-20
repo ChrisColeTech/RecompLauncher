@@ -57,6 +57,8 @@ struct Game {
     int workers = 0; // Zero inherits the launcher default.
     int optimization = 2;
     QDateTime lastPlayed, lastBuilt;
+    // Execution hints: how many entries <data>/discovered.tsv held when the last build started (that build took them in)
+    int hintsBuilt = 0;
     // The engine whose saves were offered to this build once (copy saves between Turbo and nxrs): not offered again.
     QString savesOffered;
     QString executable() const;
@@ -94,6 +96,7 @@ struct PlaySettings {
     bool pause = false;   // pause_on_focus_loss: pause while the window is in the background
     bool mute = false;    // mute_on_focus_loss: mute while the window is in the background
     bool docked = true;   // docked: TV mode (sharper) or handheld (lighter); TV by default
+    bool askUser = false; // ask_user: ask who is playing when several profiles exist
 };
 class Library {
 public:
@@ -121,6 +124,7 @@ public:
     bool muteOnFocusLoss = false;
     // Settings > Play, the screen mode: TV mode (docked=1, sharper) by default, handheld (docked=0, lighter)
     bool docked = true;
+    bool askUser = false;   // Settings > Play: ask_user (off: the first profile plays)
     PlaySettings play() const;
     QByteArray geometry, dockState;
     QVector<Game> games;
@@ -143,7 +147,12 @@ bool writeButtonLayout(const QString& ini, const QString& layout, QString* error
 // Everything the launcher owns in a game's INI (renderer + button layout), written at build, play and settings change.
 bool writeGameSettings(const Game& game, const QString& launcherLayout, const PlaySettings& play, QString* error);
 bool writeMuteOnFocusLoss(const QString& ini, bool mute, QString* error);   // [Controls] mute_on_focus_loss=0 / 1
-bool writePlaySettings(const QString& ini, const PlaySettings& play, QString* error);   // pause, mute, docked
+bool writePlaySettings(const QString& ini, const PlaySettings& play, QString* error);   // pause, mute, docked, ask_user
+bool readAskUser(const QString& ini);
+// Execution hints (nxrs): a run that interpreted code the build missed appends it to <data>/discovered.tsv (one entry a
+// line, '#' lines are comments); the next build translates them. Entries in the file, and those since the last build.
+int discoveredCount(const QString& dataDir);
+int newDiscoveries(const Game& game);
 bool readMuteOnFocusLoss(const QString& ini);
 // pause_on_focus_loss (Settings > Play, global): written under [Controls] (the engine's section) as 0 / 1.
 bool writePauseOnFocusLoss(const QString& ini, bool pause, QString* error);

@@ -132,7 +132,7 @@ QJsonObject Game::json() const {
         {"builtSource", builtSource}, {"buildIncomplete", buildIncomplete}, {"lastPlayed", lastPlayed.toString(Qt::ISODate)},
         {"lastBuilt", lastBuilt.toString(Qt::ISODate)}, {"dlc", QJsonArray::fromStringList(dlc)},
         {"updates", [this] { QJsonArray list; for (const auto& u : updates) list.append(QJsonObject{{"path", u.path}, {"titleId", u.titleId}, {"version", u.version}, {"display", u.display}}); return list; }()},
-        {"updateChoice", updateChoice}, {"builtUpdate", builtUpdate}, {"engine", engine}, {"savesOffered", savesOffered}};
+        {"updateChoice", updateChoice}, {"builtUpdate", builtUpdate}, {"engine", engine}, {"hintsBuilt", hintsBuilt}, {"savesOffered", savesOffered}};
 }
 Game Game::fromJson(const QJsonObject& o) {
     Game g;
@@ -149,6 +149,7 @@ Game Game::fromJson(const QJsonObject& o) {
     g.engine = o["engine"].toString() == engineNxrs ? engineNxrs : engineTurbo;   // absent (an older library): Turbo
     g.builtSource = o["builtSource"].toString();
     g.savesOffered = o["savesOffered"].toString();
+    g.hintsBuilt = qMax(0, o["hintsBuilt"].toInt());
     g.buildIncomplete = o["buildIncomplete"].toBool();
     g.lastPlayed = QDateTime::fromString(o["lastPlayed"].toString(), Qt::ISODate);
     g.lastBuilt = QDateTime::fromString(o["lastBuilt"].toString(), Qt::ISODate);
@@ -328,6 +329,7 @@ bool Library::load(QString* error) {
     pauseOnFocusLoss = o["pauseOnFocusLoss"].toBool(false);
     muteOnFocusLoss = o["muteOnFocusLoss"].toBool(false);
     docked = o["docked"].toBool(true);
+    askUser = o["askUser"].toBool(false);
     geometry = QByteArray::fromBase64(o["geometry"].toString().toLatin1());
     dockState = QByteArray::fromBase64(o["dockState"].toString().toLatin1());
     games.clear();
@@ -345,7 +347,7 @@ bool Library::save(QString* error) const {
     for (const auto& g : games) entries.append(g.json());
     QJsonObject o{{"schema", 1}, {"games", entries}, {"toolRoot", toolRoot}, {"toolRootChosen", toolRootChosen}, {"outputRoot", outputRoot}, {"keysPath", keysPath}, {"nxrsBuild", nxrsBuild}, {"jobs", jobs},
         {"viewMode", viewMode}, {"coverWidth", coverWidth}, {"showBackground", showBackground},
-        {"colorMode", colorMode}, {"accentColor", accentColor}, {"buttonLayout", buttonLayout}, {"pauseOnFocusLoss", pauseOnFocusLoss}, {"muteOnFocusLoss", muteOnFocusLoss}, {"docked", docked},
+        {"colorMode", colorMode}, {"accentColor", accentColor}, {"buttonLayout", buttonLayout}, {"pauseOnFocusLoss", pauseOnFocusLoss}, {"muteOnFocusLoss", muteOnFocusLoss}, {"docked", docked}, {"askUser", askUser},
         {"geometry", QString::fromLatin1(geometry.toBase64())}, {"dockState", QString::fromLatin1(dockState.toBase64())}};
     QSaveFile file(path);
     if (!file.open(QIODevice::WriteOnly)) return fail(error, file.errorString());
@@ -872,7 +874,31 @@ bool readPauseOnFocusLoss(const QString& ini) {
     }
     return pause;
 }
-PlaySettings Library::play() const { return PlaySettings{pauseOnFocusLoss, muteOnFocusLoss, docked}; }
+PlaySettings Library::play() const { return PlaySettings{pauseOnFocusLoss, muteOnFocusLoss, docked, askUser}; }
+bool readAskUser(const QString& ini) {
+    QFile file(ini);
+    bool ask = false;
+    if (!file.open(QIODevice::ReadOnly)) return ask;
+    for (const auto& line : QString::fromUtf8(file.readAll()).split('\n')) {
+        const auto trimmed = line.trimmed();
+        if (trimmed.startsWith("ask_user=")) ask = trimmed.mid(9).trimmed() == "1";
+    }
+    return ask;
+}
+int discoveredCount(const QString& dataDir) {
+    QFile file(QDir(dataDir).filePath("discovered.tsv"));
+    if (!file.open(QIODevice::ReadOnly)) return 0;
+    int n = 0;
+    for (const auto& line : QString::fromUtf8(file.readAll()).split('\n')) {
+        const auto t = line.trimmed();
+        if (!t.isEmpty() && !t.startsWith('#')) ++n;
+    }
+    return n;
+}
+int newDiscoveries(const Game& game) {
+    if (!game.nxrs() || !game.hasBuild()) return 0;
+    return qMax(0, discoveredCount(game.dataDir()) - game.hintsBuilt);
+}
 bool writeMuteOnFocusLoss(const QString& ini, bool mute, QString* error) {
     return writeIniKey(ini, "Controls", "mute_on_focus_loss", mute ? "1" : "0", error);
 }
@@ -888,7 +914,8 @@ bool readMuteOnFocusLoss(const QString& ini) {
 }
 bool writePlaySettings(const QString& ini, const PlaySettings& play, QString* error) {
     return writePauseOnFocusLoss(ini, play.pause, error) && writeMuteOnFocusLoss(ini, play.mute, error)
-        && writeDocked(ini, play.docked, error);
+        && writeDocked(ini, play.docked, error)
+        && writeIniKey(ini, "Controls", "ask_user", play.askUser ? "1" : "0", error);
 }
 bool writeGameSettings(const Game& game, const QString& launcherLayout, const PlaySettings& play, QString* error) {
     return writeRenderer(game.iniPath(), game.renderer, error)

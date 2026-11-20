@@ -200,6 +200,12 @@ one changes:
 | **Screen mode**: TV mode — sharper / Handheld — lighter | `docked` (`[Display]`) | TV mode (`docked=1`) |
 | **Pause the game when its window is in the background** | `pause_on_focus_loss` (`[Controls]`) | off: the game keeps running, as a PC game does |
 | **Mute the game when its window is in the background** | `mute_on_focus_loss` (`[Controls]`) | off: the sound goes on |
+| **Ask who is playing (when several profiles exist)** | `ask_user` (`[Controls]`) | off: the first profile plays |
+
+**Rebuild for full speed.** When an nxrs game's run interprets code its build missed, the engine appends it to
+`<data>\discovered.tsv`; the next build translates it. A game whose file has entries the last build did not take in
+shows the status **Rebuild for full speed**, and when it exits the status bar says how many new functions were found
+(`library.json` per game `hintsBuilt`: the entries when the last build started).
 
 The screen mode was a per-game choice in Properties → Runtime before; that row is gone. A per-game
 `pauseOnFocusLoss` written by an earlier launcher is ignored on load and left out at the next save.

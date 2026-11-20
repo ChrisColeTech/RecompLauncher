@@ -167,6 +167,23 @@ private slots:
         QVERIFY(Library(tmp.filePath("none.json")).docked);{Library l(tmp.filePath("d.json"));l.docked=false;QVERIFY(l.save(&error));Library r(tmp.filePath("d.json"));QVERIFY(r.load(&error));QVERIFY(!r.docked);QVERIFY(!r.play().docked);}
         BuildManager builder;QVERIFY(!builder.play.pause&&!builder.play.mute);
     }
+    void askUserAndDiscoveries(){
+        QTemporaryDir tmp;QString error;
+        // ask_user beside the other Play settings: global, off by default, written into the INI
+        const QString ini=tmp.filePath("Game.ini");QVERIFY(!readAskUser(ini));
+        QVERIFY(writePlaySettings(ini,PlaySettings{false,false,true,true},&error));QVERIFY(readAskUser(ini));
+        QVERIFY(writePlaySettings(ini,PlaySettings{},&error));QVERIFY(!readAskUser(ini));
+        {Library l(tmp.filePath("a.json"));QVERIFY(!l.askUser);l.askUser=true;QVERIFY(l.save(&error));Library r(tmp.filePath("a.json"));QVERIFY(r.load(&error));QVERIFY(r.askUser);QVERIFY(r.play().askUser);}
+        // discovered.tsv: the entries a run interpreted; those since the last build ask for a rebuild (nxrs games only)
+        Game game;game.engine=engineNxrs;game.buildDir=tmp.filePath("build");game.outputName="Game";
+        for(const auto& path:{game.executable(),game.codeModule()})writeFile(path,"x");QVERIFY(QDir().mkpath(game.dataDir()));
+        QVERIFY(game.hasBuild());QCOMPARE(discoveredCount(game.dataDir()),0);QCOMPARE(newDiscoveries(game),0);
+        writeFile(game.dataDir()+"/discovered.tsv","# module\toffset\twords\nmain\t0x1234\t1 2 3 4\n\nsdk\t0x40\t5 6 7 8\n");
+        QCOMPARE(discoveredCount(game.dataDir()),2);QCOMPARE(newDiscoveries(game),2);
+        game.hintsBuilt=2;QCOMPARE(newDiscoveries(game),0);                                  // the last build took both in
+        QCOMPARE(Game::fromJson(game.json()).hintsBuilt,2);
+        game.engine=engineTurbo;game.hintsBuilt=0;QCOMPARE(newDiscoveries(game),0);          // Turbo writes no hints
+    }
     void buttonLayoutIni() {
         QTemporaryDir tmp; const QString path=tmp.filePath("Game.ini");
         // the runtime's own INI: [Controls] already has the key (it writes every key with its default)

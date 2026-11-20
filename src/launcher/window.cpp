@@ -157,7 +157,7 @@ Window::Window(const QString& file,const QString& root,bool isDemo):library(file
             if(okay){
                 // a package with the game and its DLC in one file: the first build from it lists it as the game's DLC too
                 if(builder.sourceHoldsDlc()&&adoptPackageDlc(*game,game->builtSource))console->appendPlainText("DLC: "+QFileInfo(game->source).fileName()+" is now on this game's DLC list");
-                game->builtSource=game->source;game->builtUpdate=builder.appliedUpdate();game->buildIncomplete=false;game->lastBuilt=QDateTime::currentDateTime();
+                game->builtSource=game->source;game->builtUpdate=builder.appliedUpdate();game->buildIncomplete=false;game->lastBuilt=QDateTime::currentDateTime();game->hintsBuilt=builder.hintsAtStart;
             }
             save();
         }
@@ -215,7 +215,10 @@ Window::Window(const QString& file,const QString& root,bool isDemo):library(file
     auto* tableEnter=new QShortcut(QKeySequence(Qt::Key_Return),table,[this]{activateGame();});tableEnter->setContext(Qt::WidgetShortcut);
     auto* poll=new QTimer(this);poll->setInterval(2500);
     connect(poll,&QTimer::timeout,this,[this]{
-        if(!demo){const auto detected=findRunningGames(library.games);if(detected!=running){running=detected;refreshLibrary();}}
+        if(!demo){const auto detected=findRunningGames(library.games);if(detected!=running){
+            for(auto it=running.cbegin();it!=running.cend();++it)if(!detected.contains(it.key()))if(const auto* g=library.find(it.key()))
+                if(const int n=newDiscoveries(*g))jobLabel->setText(QString("%1: rebuild for full speed (%2 new function%3 found; the next build takes them in)").arg(g->title).arg(n).arg(n==1?"":"s"));
+            running=detected;refreshLibrary();}}
     });poll->start();
     refreshTools();refreshLibrary();
 #ifdef Q_OS_WIN
@@ -355,6 +358,7 @@ QString Window::statusFor(const Game& g)const{
     if(running.contains(g.id))return "Running";
     if(g.hasBuild()&&g.source.endsWith(".nup",Qt::CaseInsensitive)&&!g.sourceAvailable())return "Source offline";
     if(g.updatePending())return "Update changed — build again";
+    if(newDiscoveries(g))return "Rebuild for full speed";   // the run interpreted code the build missed; the next build takes it in
     return g.hasBuild()?"Ready to play":"Build needed";
 }
 void Window::save(){if(demo)return;QString error;if(!library.save(&error))message("Could not save library",error,true);}
@@ -801,6 +805,8 @@ void Window::showSettings(int initialTab){
     play->addRow(pauseDefault);
     auto* muteDefault=new QCheckBox("Mute the game when its window is in the background");muteDefault->setObjectName("MuteOnFocusLoss");muteDefault->setChecked(library.muteOnFocusLoss);
     play->addRow(muteDefault);
+    auto* askUser=new QCheckBox("Ask who is playing (when several profiles exist)");askUser->setObjectName("AskUser");askUser->setChecked(library.askUser);
+    play->addRow(askUser);
     auto* playNote=textLabel("These apply to every game. Off: a game keeps running, and its sound playing, while you use another window, as a PC game does. Built games get the change in their settings file right away, the others when they are built.","Muted");playNote->setWordWrap(true);play->addRow(playNote);
     auto* appearance=tabForm(tabs,"Appearance");
     auto* mode=new QComboBox;mode->addItem("Dark","dark");mode->addItem("Light","light");mode->setCurrentIndex(library.colorMode=="light"?1:0);appearance->addRow("Color mode",mode);
@@ -832,8 +838,8 @@ void Window::showSettings(int initialTab){
             for(const auto& g:library.games)if(g.buttonLayout.isEmpty()&&g.hasBuild()&&!writeButtonLayout(g.iniPath(),layout,&error))failed++;
             if(failed)message("Cannot save game settings",QString("The controller layout could not be written to %1 game(s): %2\nIt is written again when you play.").arg(failed).arg(error),true);
         }
-        if(pauseDefault->isChecked()!=library.pauseOnFocusLoss||muteDefault->isChecked()!=library.muteOnFocusLoss||screenMode->currentData().toBool()!=library.docked){
-            library.pauseOnFocusLoss=pauseDefault->isChecked();library.muteOnFocusLoss=muteDefault->isChecked();library.docked=screenMode->currentData().toBool();int failed=0;QString error;
+        if(pauseDefault->isChecked()!=library.pauseOnFocusLoss||muteDefault->isChecked()!=library.muteOnFocusLoss||screenMode->currentData().toBool()!=library.docked||askUser->isChecked()!=library.askUser){
+            library.pauseOnFocusLoss=pauseDefault->isChecked();library.muteOnFocusLoss=muteDefault->isChecked();library.docked=screenMode->currentData().toBool();library.askUser=askUser->isChecked();int failed=0;QString error;
             for(const auto& g:library.games)if(g.hasBuild()&&!writePlaySettings(g.iniPath(),library.play(),&error))failed++;
             if(failed)message("Cannot save game settings",QString("The play settings could not be written to %1 game(s): %2\nThey are written again when you play.").arg(failed).arg(error),true);
         }
@@ -858,7 +864,7 @@ void Window::startBuild(){
     auto* game=selected();if(!game||demo||running.contains(game->id))return;
     game->outputName=outputNameFor(game->outputName);   // a name from an older library keeps step with what the engine writes
     Game build=*game;build.buttonLayout=effectiveButtonLayout(*game,library.buttonLayout);
-    builder.play=library.play();
+    builder.play=library.play();builder.hintsAtStart=discoveredCount(game->dataDir());
     QString error;if(!builder.start(build,tools,library.jobs,&error)){emit smokeFinished(false);message("Cannot start build",error,true);return;}
     game->buildIncomplete=true;save();console->clear();console->appendPlainText("Source: "+displayPath(game->source)+"\nOutput: "+displayPath(game->buildDir)+"\n");
     buildDock->setWindowTitle("Build output — "+game->title);showBuildOutput();refreshLibrary();
