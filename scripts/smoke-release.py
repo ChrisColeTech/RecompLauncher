@@ -152,11 +152,14 @@ def main():
                 raise RuntimeError('Bundled hactool did not start')
         # the nxrs engine, when the release has it: nxrs-build answers the launcher's contract and finds, relocated,
         # its engine libraries and (gnullvm) the bundled llvm-mingw; --build-runtime checks both and builds nothing
-        nxrs = root / package.NXRS_ENGINE / 'nxrs-build.exe'
-        if win and nxrs.is_file():
+        nxrs = root / package.NXRS_ENGINE / package.NXRS_EXE['windows' if win else 'linux']
+        if nxrs.is_file():
             if 'nxrs-contract %d' % package.NXRS_CONTRACT not in run([nxrs, 'contract'], temp, env):
                 raise RuntimeError('Bundled nxrs-build does not answer the launcher contract')
-            if (root / package.NXRS_ENGINE / package.NXRS_GNU[0]).is_file():   # (MSVC needs the machine's Visual Studio)
+            # the shader translator starts relocated (a build runs it for every game's shaders)
+            xlate = root / package.NXRS_ENGINE / package.NXRS_TOOLS['windows' if win else 'linux'][0]
+            print('dmsh_xlate: ' + run([xlate, '--source-sha'], temp, env).strip())   # exits non-zero when it cannot start
+            if win and (root / package.NXRS_ENGINE / package.NXRS_GNU[0]).is_file():   # (MSVC needs the machine's Visual Studio)
                 print('nxrs-build (llvm-mingw): ' + run([nxrs, '--build-runtime'], temp, dict(env, NXRS_TOOLCHAIN='gnu')).strip())
         run([python, '-I', '-c', 'from compression import zstd; import ctypes, ssl, multiprocessing'], temp, env)
         # Switch 2 ZBIC-compressed NSO (Ocarina of Time): the bundled engine + Python decode it and pass its hash check

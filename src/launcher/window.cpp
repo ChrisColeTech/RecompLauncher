@@ -677,19 +677,24 @@ bool Window::editGame(Game& game,int tab,bool adding){
     engine->setToolTip("The engine that builds this game. Each engine builds into its own folder (the nxrs one ends in [nxrs]), so both builds can exist; switch back any time.");
     build->addRow("Engine",engine);
     // nxrs compiles at one measured flag set: the optimization level is Turbo's
-    const auto engineChanged=[engine,optimization]{optimization->setEnabled(engine->currentData().toString()!=engineNxrs);};engineChanged();
+    auto* runtime=tabForm(tabs,"Runtime");auto* renderer=new QComboBox;renderer->addItem("Vulkan — native NVN","vulkan");renderer->addItem("OpenGL — compatibility","opengl");renderer->setCurrentIndex(qMax(0,renderer->findData(game.renderer)));runtime->addRow("Graphics backend",renderer);
+    // the nxrs engine has one renderer: shown as fixed text, not a choice
+    auto* vulkanOnly=textLabel("Vulkan");vulkanOnly->setObjectName("NxrsRenderer");runtime->addRow("Graphics backend",vulkanOnly);
+    auto* buttonLayout=new QComboBox;buttonLayout->addItem("Use default — "+buttonLayoutName(library.buttonLayout),QString());addButtonLayouts(buttonLayout);
+    buttonLayout->setCurrentIndex(qMax(0,buttonLayout->findData(game.buttonLayout)));runtime->addRow("Controller layout",buttonLayout);
+    auto* runtimeNote=textLabel({},"Muted");runtimeNote->setWordWrap(true);runtime->addRow(runtimeNote);
+    // Turbo's choices as they were; for the nxrs engine: no OpenGL, no -O (it compiles at one measured flag set), and the
+    // screen mode as what it is on a PC, a quality choice (the build starts it from the game's profile, op_mode)
+    const auto engineChanged=[engine,optimization,build,runtime,renderer,vulkanOnly,runtimeNote]{
+        const bool nx=engine->currentData().toString()==engineNxrs;
+        build->setRowVisible(optimization,!nx);runtime->setRowVisible(renderer,!nx);runtime->setRowVisible(vulkanOnly,nx);
+        runtimeNote->setText(nx?"Other runtime options remain in the game's INI; the screen mode and the background settings are in Settings > Play. The controller layout is saved right away (the default is in Settings > Controller)."
+                               :"Vulkan needs the bundled shader tools, Python, and .NET 10.\n\nOther runtime options remain in the game's INI; the screen mode and the background settings are in Settings > Play. Renderer changes are applied when you next play; the controller layout is saved right away (the default is in Settings > Controller).");
+    };engineChanged();
     connect(engine,qOverload<int>(&QComboBox::currentIndexChanged),&dialog,[engine,destination,engineChanged]{
         destination->setText(QDir::toNativeSeparators(buildFolderFor(destination->text().trimmed(),engine->currentData().toString())));
         engineChanged();
     });
-    auto* runtime=tabForm(tabs,"Runtime");auto* renderer=new QComboBox;renderer->addItem("Vulkan — native NVN","vulkan");renderer->addItem("OpenGL — compatibility","opengl");renderer->setCurrentIndex(qMax(0,renderer->findData(game.renderer)));runtime->addRow("Graphics backend",renderer);
-    auto* buttonLayout=new QComboBox;buttonLayout->addItem("Use default — "+buttonLayoutName(library.buttonLayout),QString());addButtonLayouts(buttonLayout);
-    buttonLayout->setCurrentIndex(qMax(0,buttonLayout->findData(game.buttonLayout)));runtime->addRow("Controller layout",buttonLayout);
-    const bool hasIni=QFileInfo(game.iniPath()).exists(),wasDocked=readDocked(game.iniPath());
-    auto* screenMode=new QComboBox;screenMode->addItem("TV mode — full resolution (recommended)",true);screenMode->addItem("Handheld mode — the console's own screen, faster",false);
-    screenMode->setCurrentIndex(wasDocked?0:1);screenMode->setEnabled(hasIni);screenMode->setToolTip("TV mode: the game renders as it does docked (Switch 1920x1080, Switch 2 up to 2560x1440 and more). Handheld mode: 1280x720 on a Switch, 1920x1080 on a Switch 2, softer on a monitor but lighter on the GPU. Available once the game is built.");
-    runtime->addRow("Screen mode",screenMode);
-    auto* runtimeNote=textLabel("Vulkan needs the bundled shader tools, Python, and .NET 10.\n\nOther runtime options remain in the game's INI. Renderer and screen mode changes are applied when you next play; the controller layout is saved right away (the default is in Settings > Controller).","Muted");runtimeNote->setWordWrap(true);runtime->addRow(runtimeNote);
     auto* openIni=new QPushButton("Open game settings file");openIni->setEnabled(QFileInfo(game.iniPath()).exists());runtime->addRow("",openIni);connect(openIni,&QPushButton::clicked,&dialog,[&game]{QDesktopServices::openUrl(QUrl::fromLocalFile(game.iniPath()));});
     auto* artwork=tabForm(tabs,"Artwork");auto* cover=new QLineEdit(game.cover);auto* background=new QLineEdit(game.background);
     artwork->addRow("Cover image",browseField(cover,&dialog,"Choose cover","Images (*.png *.jpg *.jpeg *.webp *.bmp)"));
@@ -709,11 +714,10 @@ bool Window::editGame(Game& game,int tab,bool adding){
         game.title=title->text().trimmed();game.source=source->text().trimmed().isEmpty()?QString{}:QFileInfo(QDir::fromNativeSeparators(source->text().trimmed())).absoluteFilePath();
         game.buildDir=QFileInfo(QDir::fromNativeSeparators(destination->text().trimmed())).absoluteFilePath();
         setGameEngine(game,engine->currentData().toString());
-        if(adding)game.outputName=outputNameFor(name->text());game.workers=workers->value();game.optimization=optimization->currentIndex();game.renderer=renderer->currentData().toString();game.buttonLayout=buttonLayout->currentData().toString();
+        if(adding)game.outputName=outputNameFor(name->text());game.workers=workers->value();game.optimization=optimization->currentIndex();game.renderer=engine->currentData().toString()==engineNxrs?QString("vulkan"):renderer->currentData().toString();game.buttonLayout=buttonLayout->currentData().toString();
         game.cover=QDir::fromNativeSeparators(cover->text().trimmed());game.background=QDir::fromNativeSeparators(background->text().trimmed());
         if(dlc)game.dlc=dlc->packages();
         if(updates)game.updates=updates->updates();
-        if(hasIni&&screenMode->currentData().toBool()!=wasDocked){QString error;if(!writeDocked(game.iniPath(),screenMode->currentData().toBool(),&error)){QMessageBox::warning(&dialog,"Cannot save game settings",error);return;}}
         dialog.accept();
     });
     return dialog.exec()==QDialog::Accepted;
@@ -790,8 +794,14 @@ void Window::showSettings(int initialTab){
     controllerNote->setWordWrap(true);controller->addRow(controllerNote);
     auto* playTab=new QWidget;auto* play=new QFormLayout(playTab);play->setContentsMargins(18,22,18,20);play->setHorizontalSpacing(15);play->setVerticalSpacing(12);play->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
     auto* pauseDefault=new QCheckBox("Pause the game when its window is in the background");pauseDefault->setObjectName("PauseOnFocusLoss");pauseDefault->setChecked(library.pauseOnFocusLoss);
+    auto* screenMode=new QComboBox;screenMode->setObjectName("ScreenMode");screenMode->addItem("TV mode — sharper",true);screenMode->addItem("Handheld — lighter",false);
+    screenMode->setCurrentIndex(library.docked?0:1);
+    screenMode->setToolTip("TV mode renders each game at its TV resolution (Switch 1920x1080, Switch 2 up to 2560x1440 and more): sharper. Handheld renders at its handheld resolution (1280x720 / 1920x1080): lighter on the GPU.");
+    play->addRow("Screen mode",screenMode);
     play->addRow(pauseDefault);
-    auto* playNote=textLabel("Off: a game keeps running while you use another window, as a PC game does. One setting for every game: built games get it in their settings file right away, the others when they are built.","Muted");playNote->setWordWrap(true);play->addRow(playNote);
+    auto* muteDefault=new QCheckBox("Mute the game when its window is in the background");muteDefault->setObjectName("MuteOnFocusLoss");muteDefault->setChecked(library.muteOnFocusLoss);
+    play->addRow(muteDefault);
+    auto* playNote=textLabel("These apply to every game. Off: a game keeps running, and its sound playing, while you use another window, as a PC game does. Built games get the change in their settings file right away, the others when they are built.","Muted");playNote->setWordWrap(true);play->addRow(playNote);
     auto* appearance=tabForm(tabs,"Appearance");
     auto* mode=new QComboBox;mode->addItem("Dark","dark");mode->addItem("Light","light");mode->setCurrentIndex(library.colorMode=="light"?1:0);appearance->addRow("Color mode",mode);
     auto* accent=new QComboBox;for(const auto& color:Theme::accents())accent->addItem(color.label,color.id);accent->setCurrentIndex(qMax(0,accent->findData(library.accentColor)));appearance->addRow("Accent color",accent);
@@ -822,10 +832,10 @@ void Window::showSettings(int initialTab){
             for(const auto& g:library.games)if(g.buttonLayout.isEmpty()&&g.hasBuild()&&!writeButtonLayout(g.iniPath(),layout,&error))failed++;
             if(failed)message("Cannot save game settings",QString("The controller layout could not be written to %1 game(s): %2\nIt is written again when you play.").arg(failed).arg(error),true);
         }
-        if(pauseDefault->isChecked()!=library.pauseOnFocusLoss){
-            library.pauseOnFocusLoss=pauseDefault->isChecked();int failed=0;QString error;
-            for(const auto& g:library.games)if(g.hasBuild()&&!writePauseOnFocusLoss(g.iniPath(),library.pauseOnFocusLoss,&error))failed++;
-            if(failed)message("Cannot save game settings",QString("The pause setting could not be written to %1 game(s): %2\nIt is written again when you play.").arg(failed).arg(error),true);
+        if(pauseDefault->isChecked()!=library.pauseOnFocusLoss||muteDefault->isChecked()!=library.muteOnFocusLoss||screenMode->currentData().toBool()!=library.docked){
+            library.pauseOnFocusLoss=pauseDefault->isChecked();library.muteOnFocusLoss=muteDefault->isChecked();library.docked=screenMode->currentData().toBool();int failed=0;QString error;
+            for(const auto& g:library.games)if(g.hasBuild()&&!writePlaySettings(g.iniPath(),library.play(),&error))failed++;
+            if(failed)message("Cannot save game settings",QString("The play settings could not be written to %1 game(s): %2\nThey are written again when you play.").arg(failed).arg(error),true);
         }
         backgroundAction->setChecked(library.showBackground);save();refreshTools();refreshSelection();dialog.accept();
     });tabs->addTab(playTab,"Play");tabs->setCurrentIndex(qBound(0,initialTab,4));dialog.exec();setAppearance(library.colorMode,library.accentColor);
@@ -848,7 +858,7 @@ void Window::startBuild(){
     auto* game=selected();if(!game||demo||running.contains(game->id))return;
     game->outputName=outputNameFor(game->outputName);   // a name from an older library keeps step with what the engine writes
     Game build=*game;build.buttonLayout=effectiveButtonLayout(*game,library.buttonLayout);
-    builder.pauseOnFocusLoss=library.pauseOnFocusLoss;
+    builder.play=library.play();
     QString error;if(!builder.start(build,tools,library.jobs,&error)){emit smokeFinished(false);message("Cannot start build",error,true);return;}
     game->buildIncomplete=true;save();console->clear();console->appendPlainText("Source: "+displayPath(game->source)+"\nOutput: "+displayPath(game->buildDir)+"\n");
     buildDock->setWindowTitle("Build output — "+game->title);showBuildOutput();refreshLibrary();
@@ -874,7 +884,7 @@ void Window::play(){
         const auto answer=QMessageBox::question(this,"Copy saves",QString("The %1 build of “%2” has saves. Copy them into this build before playing?\n\nThis build's save folder is backed up first (save-backup-<time> beside it). Asked once; Game > Copy saves does it later.").arg(other,game->title),QMessageBox::Yes|QMessageBox::No,QMessageBox::No);
         if(answer==QMessageBox::Yes){copySaves(true,false);game=selected();if(!game)return;}
     }
-    QString error;if(!writeGameSettings(*game,library.buttonLayout,library.pauseOnFocusLoss,&error)){message("Cannot save game settings",error,true);return;}
+    QString error;if(!writeGameSettings(*game,library.buttonLayout,library.play(),&error)){message("Cannot save game settings",error,true);return;}
     QProcess process;process.setProgram(game->executable());process.setWorkingDirectory(game->buildDir);auto env=tools.environment();
     process.setProcessEnvironment(env);qint64 pid=0;if(!process.startDetached(&pid)){message("Could not launch",process.errorString(),true);return;}
     running[game->id]=pid;game->lastPlayed=QDateTime::currentDateTime();save();refreshLibrary();jobLabel->setText("Game launched");

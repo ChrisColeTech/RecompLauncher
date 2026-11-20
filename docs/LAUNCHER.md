@@ -180,21 +180,29 @@ Preview/demo entries are not saved and do not contain bundled games or downloada
 
 ## Build and runtime options
 
-**Properties → Build** contains the output folder, compiler workers (0 inherits the global default), and
-optimization level. O2 is the default. The output filename is fixed for an existing entry so renaming a
-display title does not silently rename native modules and save directories.
+**Properties → Build** contains the output folder, compiler workers (0 inherits the global default), and, for a
+Turbo game, the optimization level (O2 is the default; an nxrs game has no such row: nxrs-build compiles at one
+measured flag set). The output filename is fixed for an existing entry so renaming a display title does not silently
+rename native modules and save directories.
 
-**Properties → Runtime** selects Vulkan/native NVN or OpenGL. The renderer value is written to the game INI
-on the next launch without discarding other settings. Vulkan needs a runtime built with NVN, deployed shader
+**Properties → Runtime**, for a Turbo game, selects Vulkan/native NVN or OpenGL. The renderer value is written to the
+game INI on the next launch without discarding other settings. Vulkan needs a runtime built with NVN, deployed shader
 tools, Python, and .NET 10. The launcher checks the latter tools and reports missing setup instead of silently
-launching a Vulkan game with no shader translator.
+launching a Vulkan game with no shader translator. An nxrs game shows **Vulkan** as fixed text (the only renderer of
+that engine; `renderer=vulkan` is written).
 
-**Pause the game when its window is in the background** (the engine's `pause_on_focus_loss` key, `[Controls]`):
-one plain checkbox in **Settings → Play**, for every game (there is no per-game choice). Off by default: a game keeps
-running while another window has focus, as a PC game does. The launcher writes the value into the game INI when a
-build succeeds and at Play, and into every built game's INI right away when the checkbox changes (`library.json`:
-top-level `pauseOnFocusLoss`; a per-game `pauseOnFocusLoss` written by an earlier launcher is ignored on load and
-left out at the next save).
+**Settings → Play** holds the player's settings, one value for every game (never per game; `library.json` top
+level), written into each game's INI when a build succeeds, at Play, and into every built game's INI right away when
+one changes:
+
+| Setting | INI key | Default |
+|---|---|---|
+| **Screen mode**: TV mode — sharper / Handheld — lighter | `docked` (`[Display]`) | TV mode (`docked=1`) |
+| **Pause the game when its window is in the background** | `pause_on_focus_loss` (`[Controls]`) | off: the game keeps running, as a PC game does |
+| **Mute the game when its window is in the background** | `mute_on_focus_loss` (`[Controls]`) | off: the sound goes on |
+
+The screen mode was a per-game choice in Properties → Runtime before; that row is gone. A per-game
+`pauseOnFocusLoss` written by an earlier launcher is ignored on load and left out at the next save.
 
 **Settings → Controller** sets the default controller button layout, the engine's `button_layout` INI key:
 **Switch** (by position like the Switch pad: right = A, bottom = B; on a PlayStation pad Circle = A, Cross = B) or
@@ -342,16 +350,17 @@ Verification for these docs (November 15, 2026):
 
 ## Release integration
 
-**The nxrs engine in a release (release.yml, off by default).** The engine repository (ChrisColeTech/nxrs-engine) is
-private and this one is public, so the Windows job bundles it only when asked: a manual run with the `nxrs_engine`
-input, or a push when the repository variable `NXRS_ENGINE_IN_RELEASE` is `true`. Then it checks the engine out at
-`NXRS_ENGINE_REF` (variable, default `main`) with the secret `NXRS_ENGINE_TOKEN`, builds `nxrs-build`, the MSVC
-engine (`nxfront.lib`, `nxrt.lib`) and the gnullvm engine (llvm-mingw 20261104), and passes `--nxrs-engine`,
-`--nxrs-target`, `--nxrs-gnu` to package-release.py. Nothing changes in a release until the owner sets those.
-
-**Renderer choice (owner decision, not changed):** Properties > Runtime still offers OpenGL for every game; an nxrs
-build has only the Vulkan renderer and runs `renderer=opengl` as Vulkan without saying so (engine
-`config/options.rs`).
+**The nxrs engine in a release (release.yml, on by default).** The engine repository (ChrisColeTech/nxrs-engine) is
+public (MIT), so both bundles carry it with no token: the Windows and the Linux job check it out at `NXRS_ENGINE_REF`
+(repository variable, default `main`), build `nxrs-build` and the engine libraries (Windows: MSVC `nxfront.lib` /
+`nxrt.lib` and the gnullvm set with llvm-mingw 20261104; Linux x86-64: `libnxfront.a` / `libnxrt.a`), build the
+shader translator `dmsh_xlate` from nxnative's source (the commit in `NXRS_NXNATIVE`, the engine's
+`build_dmsh_xlate.ps1` / `.sh`, .NET 10) and pass `--nxrs-engine` (+ `--nxrs-target`, `--nxrs-gnu`) to
+package-release.py, which adds `nxrs-engine/tools/dmsh_xlate(.exe)` and `spirv-val(.exe)` (from the release's shader
+tools; `--nxrs-xlate`, `--nxrs-spirv-val` override). Off-switches: the `nxrs_engine` input of a manual run, and the
+repository variable `NXRS_ENGINE_IN_RELEASE` = `false` for pushes. Linux is x86-64 only (the engine's runtime boundary
+is x86-64 assembly); an arm64 Linux build is the engine's open 5A.1 row. Linux has no hardware test gate (owner
+2026-11-20, as Eglantine): the bundle is built and checked in CI, games build with the system clang / lld.
 
 The launcher is a frontend, not a replacement for the toolkit. A Windows release should contain this deployed
 Qt folder together with the toolkit's `switchrecomp.py` and its Python modules (`nup.py`, `nsp.py`, `nca.py`, `dlc.py`,

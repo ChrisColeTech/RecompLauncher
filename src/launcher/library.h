@@ -89,6 +89,12 @@ struct Toolchain {
     static QString discoverRoot();
 };
 
+// Settings > Play: the player's settings, one value for every game (never per game), written into every game's INI.
+struct PlaySettings {
+    bool pause = false;   // pause_on_focus_loss: pause while the window is in the background
+    bool mute = false;    // mute_on_focus_loss: mute while the window is in the background
+    bool docked = true;   // docked: TV mode (sharper) or handheld (lighter); TV by default
+};
 class Library {
 public:
     explicit Library(QString file);
@@ -111,6 +117,11 @@ public:
     // Settings > Play: the engine's pause_on_focus_loss, one value for every game (off: a game keeps running while its
     // window is in the background, as a PC game does). Written into every game's INI at build, at Play and on change.
     bool pauseOnFocusLoss = false;
+    // Settings > Play, beside it: the engine's mute_on_focus_loss (off: the sound goes on in the background).
+    bool muteOnFocusLoss = false;
+    // Settings > Play, the screen mode: TV mode (docked=1, sharper) by default, handheld (docked=0, lighter)
+    bool docked = true;
+    PlaySettings play() const;
     QByteArray geometry, dockState;
     QVector<Game> games;
 private:
@@ -130,7 +141,10 @@ QString normalizeButtonLayout(const QString& layout);
 QString effectiveButtonLayout(const Game& game, const QString& launcherDefault);
 bool writeButtonLayout(const QString& ini, const QString& layout, QString* error);
 // Everything the launcher owns in a game's INI (renderer + button layout), written at build, play and settings change.
-bool writeGameSettings(const Game& game, const QString& launcherLayout, bool pauseOnFocusLoss, QString* error);
+bool writeGameSettings(const Game& game, const QString& launcherLayout, const PlaySettings& play, QString* error);
+bool writeMuteOnFocusLoss(const QString& ini, bool mute, QString* error);   // [Controls] mute_on_focus_loss=0 / 1
+bool writePlaySettings(const QString& ini, const PlaySettings& play, QString* error);   // pause, mute, docked
+bool readMuteOnFocusLoss(const QString& ini);
 // pause_on_focus_loss (Settings > Play, global): written under [Controls] (the engine's section) as 0 / 1.
 bool writePauseOnFocusLoss(const QString& ini, bool pause, QString* error);
 bool readPauseOnFocusLoss(const QString& ini);   // false when the INI has no value (the engine's default)

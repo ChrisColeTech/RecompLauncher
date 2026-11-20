@@ -62,6 +62,7 @@ public:
     // after a backup. Not interactive: no dialogs, the outcome is saveCopyFinished.
     void copySaves(bool interactive = true, bool confirm = true);
     void showEngineSettings() { showSettings(0); }
+    void showPlaySettings() { showSettings(4); }
     NxrsDoctor nxrsDoctor() const { return runNxrsDoctor(tools.nxrsBuild, tools.environment()); }
 signals:
     void smokeFinished(bool success);

@@ -11,7 +11,7 @@ class BuildManager : public QObject {
 public:
     explicit BuildManager(QObject* parent = nullptr);
     bool start(const Game& game, const Toolchain& tools, int jobs, QString* error);
-    bool pauseOnFocusLoss = false;   // Settings > Play, written into the game's INI when the build succeeds
+    PlaySettings play;   // Settings > Play, written into the game's INI when the build succeeds
     void cancel();
     bool busy() const { return active; }
     QString gameId() const { return game.id; }

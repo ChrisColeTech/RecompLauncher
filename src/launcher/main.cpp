@@ -74,6 +74,7 @@ int main(int argc, char** argv) {
     parser.addOption({"screenshot", "Save a launcher preview and exit", "png"});
     parser.addOption({"screenshot-delay", "Milliseconds before --screenshot grabs the window (default 1100)", "ms"});
     parser.addOption({"show-engine-settings", "Open Settings > Engine (nxrs-build doctor runs there)"});
+    parser.addOption({"show-play-settings", "Open Settings > Play (screen mode, background pause and mute: every game)"});
     parser.addOption({"nxrs-doctor", "Run nxrs-build doctor for the configured nxrs-build, print its checks and exit (0 = all ok)"});
     parser.addOption({"copy-saves", "Copy the --select-title game's saves from its build with the other engine (backup first) and exit"});
     parser.addOption({"smoke-build", "Build a synthetic test input and exit (diagnostics)", "input"});
@@ -129,6 +130,7 @@ int main(int argc, char** argv) {
     if(parser.isSet("show-appearance")) QTimer::singleShot(0,&window,[&window]{window.showAppearance();});
     if(parser.isSet("show-controller")) QTimer::singleShot(0,&window,[&window]{window.showControllerSettings();});
     if(parser.isSet("show-engine-settings")) QTimer::singleShot(0,&window,[&window]{window.showEngineSettings();});
+    if(parser.isSet("show-play-settings")) QTimer::singleShot(0,&window,[&window]{window.showPlaySettings();});
     if(parser.isSet("nxrs-doctor")) {
         QTimer::singleShot(0,&window,[&window]{
             const auto d=window.nxrsDoctor();

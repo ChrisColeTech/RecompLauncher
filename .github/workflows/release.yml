@@ -14,9 +14,9 @@ on:
         default: all
         options: [all, windows, linux]
       nxrs_engine:
-        description: 'Bundle the nxrs engine (private repo ChrisColeTech/nxrs-engine; needs the NXRS_ENGINE_TOKEN secret)'
+        description: 'Bundle the nxrs engine (ChrisColeTech/nxrs-engine, public, MIT) in the Windows and Linux bundles'
         type: boolean
-        default: false
+        default: true
 
 permissions:
   contents: read
@@ -27,11 +27,13 @@ concurrency:
 
 env:
   ENGINE: third_party/Switch2RECOMP   # the engine submodule (turbo branch of Switch2RECOMP-turbo)
-  # The nxrs engine in the Windows bundle: OFF unless asked for. A manual run sets it with the nxrs_engine input; pushes
-  # (the VERSION-bump releases) only when the repository variable NXRS_ENGINE_IN_RELEASE is 'true'. Both need the
-  # secret NXRS_ENGINE_TOKEN (read access to the private engine repository). docs/LAUNCHER.md, "Release integration".
-  NXRS_ENGINE_ON: ${{ (github.event_name == 'workflow_dispatch' && inputs.nxrs_engine) || (github.event_name == 'push' && vars.NXRS_ENGINE_IN_RELEASE == 'true') }}
+  # The nxrs engine in the Windows and Linux bundles: ON (the engine is public, MIT; no token). Off-switches: the
+  # nxrs_engine input of a manual run, and the repository variable NXRS_ENGINE_IN_RELEASE = 'false' for pushes and pull
+  # requests. NXRS_ENGINE_REF (variable) picks the engine commit, main by default. docs/LAUNCHER.md, "Release integration".
+  NXRS_ENGINE_ON: ${{ (github.event_name == 'workflow_dispatch' && inputs.nxrs_engine) || (github.event_name != 'workflow_dispatch' && vars.NXRS_ENGINE_IN_RELEASE != 'false') }}
   NXRS_ENGINE_REF: ${{ vars.NXRS_ENGINE_REF || 'main' }}
+  # the nxnative commit the engine's shader translator (dmsh_xlate) is built from (the engine's own CI uses the same)
+  NXRS_NXNATIVE: 'e4b0d9b75d39c41c10fdcfec2f0b070df496d7e5'
   NXRS_RUST: '1.99.0'
   NXRS_LLVM_MINGW: '20261104'
 
@@ -133,16 +135,30 @@ jobs:
           test -s "$ENGINE/runtime/av1/lin/libdav1d.a"
           python src/recomp_cli.py --build-runtime --target linux --backend x11 --cc gcc
           SWR_QT_PREFIX="$QT_ROOT_DIR" SWR_JOBS=4 sh scripts/build-launcher.sh
-      # ---- the nxrs engine (off by default, see NXRS_ENGINE_ON): checked out with the token, built for MSVC and gnullvm
+      # ---- the nxrs engine (on by default, see NXRS_ENGINE_ON): the public engine at NXRS_ENGINE_REF, built here; its
+      # shader translator built from nxnative's source; spirv-val comes from the release's shader tools
       - name: nxrs engine checkout
-        if: runner.os == 'Windows' && env.NXRS_ENGINE_ON == 'true'
+        if: env.NXRS_ENGINE_ON == 'true'
         uses: actions/checkout@v4
         with:
           repository: ChrisColeTech/nxrs-engine
           ref: ${{ env.NXRS_ENGINE_REF }}
-          token: ${{ secrets.NXRS_ENGINE_TOKEN }}
           path: build/nxrs-engine
-      - name: nxrs engine build
+      - name: nxnative source for dmsh_xlate
+        if: env.NXRS_ENGINE_ON == 'true'
+        shell: bash
+        run: |
+          git init -q build/nxnative && cd build/nxnative
+          git config core.autocrlf true   # the CRLF files the Windows tool was built from: the same --source-sha (e11dc43d4ddc5b58)
+          git remote add origin https://github.com/seedds/nxnative.git
+          git sparse-checkout set dm/gfx/tools/dmsh_xlate dm/third_party/ryujinx
+          git fetch -q --depth 1 --filter=blob:none origin "$NXRS_NXNATIVE"
+          git checkout -q FETCH_HEAD
+      - uses: actions/setup-dotnet@v4
+        if: env.NXRS_ENGINE_ON == 'true'
+        with:
+          dotnet-version: '10.0.x'
+      - name: nxrs engine build (Windows)
         if: runner.os == 'Windows' && env.NXRS_ENGINE_ON == 'true'
         shell: pwsh
         working-directory: build/nxrs-engine
@@ -166,6 +182,19 @@ jobs:
           $lib = Get-ChildItem "$env:USERPROFILE\.cargo\registry\src" -Recurse -Filter libwindows.0.52.0.a | Where-Object { $_.FullName -match 'gnullvm' } | Select-Object -First 1
           if (-not $lib) { throw 'libwindows.0.52.0.a (windows_x86_64_gnullvm) not found' }
           Copy-Item $lib.FullName build/tools/gnu-libs/
+          pwsh src/shaders/tools/build_dmsh_xlate.ps1 -Nxnative ..\nxnative -Out build\tools\dmsh_xlate
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: nxrs engine build (Linux, x86-64)
+        if: runner.os == 'Linux' && env.NXRS_ENGINE_ON == 'true'
+        working-directory: build/nxrs-engine
+        run: |
+          sudo apt-get install -y --no-install-recommends clang lld pkg-config libvulkan-dev libasound2-dev libopus-dev \
+            libvpx-dev libdav1d-dev libavcodec-dev libavutil-dev zlib1g-dev
+          rustup toolchain install "$NXRS_RUST" --profile minimal
+          rustup default "$NXRS_RUST"
+          export NXGFX_GLSLANG="$(command -v glslangValidator)"
+          cargo build --locked --release --jobs 4 -p cli -p front -p runtime
+          bash src/shaders/tools/build_dmsh_xlate.sh ../nxnative build/tools/dmsh_xlate-linux
       - name: Package Windows
         if: runner.os == 'Windows'
         shell: pwsh
@@ -179,7 +208,10 @@ jobs:
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
       - name: Package Linux
         if: runner.os == 'Linux'
-        run: python scripts/package-release.py --deps build/release-deps --launcher bin/launcher-linux --qt "$QT_ROOT_DIR"
+        run: |
+          nxrs=()
+          if [ "$NXRS_ENGINE_ON" = true ]; then nxrs=(--nxrs-engine build/nxrs-engine --nxrs-target build/nxrs-engine/target/release); fi
+          python scripts/package-release.py --deps build/release-deps --launcher bin/launcher-linux --qt "$QT_ROOT_DIR" "${nxrs[@]}"
       - name: Test relocated Windows archive
         if: runner.os == 'Windows'
         run: python scripts/smoke-release.py dist/nxrs-windows-x64.zip

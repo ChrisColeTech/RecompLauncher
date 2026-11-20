@@ -153,15 +153,19 @@ private slots:
         QVERIFY(writePauseOnFocusLoss(old,false,&error));QFile o(old);QVERIFY(o.open(QIODevice::ReadOnly));QCOMPARE(o.readAll(),QByteArray("[Controls]\npause_on_focus_loss=0\nbutton_layout=xbox\n"));
         QVERIFY(!readPauseOnFocusLoss(tmp.filePath("missing.ini")));
         // one global value: kept in the library, not per game; a per-game value from 382ff33 is dropped on load
-        Library library(tmp.filePath("library.json"));library.pauseOnFocusLoss=true;
+        Library library(tmp.filePath("library.json"));library.pauseOnFocusLoss=true;library.muteOnFocusLoss=true;
         Game game;game.id="g";game.title="Game";game.buildDir=tmp.path();game.outputName="Game";QVERIFY(library.add(game));QVERIFY(library.save(&error));
-        Library back(tmp.filePath("library.json"));QVERIFY(back.load(&error));QVERIFY(back.pauseOnFocusLoss);
+        Library back(tmp.filePath("library.json"));QVERIFY(back.load(&error));QVERIFY(back.pauseOnFocusLoss);QVERIFY(back.muteOnFocusLoss);QVERIFY(back.play().mute);
         QVERIFY(!back.games[0].json().contains("pauseOnFocusLoss"));
         {QJsonObject legacy=back.games[0].json();legacy["pauseOnFocusLoss"]="1";QVERIFY(!Game::fromJson(legacy).json().contains("pauseOnFocusLoss"));}
         // writeGameSettings (Play, and the build when it succeeds) writes the global value with the renderer and the layout
-        QVERIFY2(writeGameSettings(game,"switch",true,&error),qPrintable(error));QVERIFY(readPauseOnFocusLoss(game.iniPath()));
-        QVERIFY(writeGameSettings(game,"switch",false,&error));QVERIFY(!readPauseOnFocusLoss(game.iniPath()));
-        BuildManager builder;QVERIFY(!builder.pauseOnFocusLoss);
+        QVERIFY2(writeGameSettings(game,"switch",PlaySettings{true,true},&error),qPrintable(error));QVERIFY(readPauseOnFocusLoss(game.iniPath()));QVERIFY(readMuteOnFocusLoss(game.iniPath()));
+        QVERIFY(writeGameSettings(game,"switch",PlaySettings{false,true},&error));QVERIFY(!readPauseOnFocusLoss(game.iniPath()));QVERIFY(readMuteOnFocusLoss(game.iniPath()));
+        QVERIFY(writePlaySettings(game.iniPath(),PlaySettings{},&error));QVERIFY(!readMuteOnFocusLoss(game.iniPath()));
+        // the screen mode is global too: TV by default, handheld written as docked=0 for every game
+        QVERIFY(readDocked(game.iniPath()));QVERIFY(writePlaySettings(game.iniPath(),PlaySettings{false,false,false},&error));QVERIFY(!readDocked(game.iniPath()));
+        QVERIFY(Library(tmp.filePath("none.json")).docked);{Library l(tmp.filePath("d.json"));l.docked=false;QVERIFY(l.save(&error));Library r(tmp.filePath("d.json"));QVERIFY(r.load(&error));QVERIFY(!r.docked);QVERIFY(!r.play().docked);}
+        BuildManager builder;QVERIFY(!builder.play.pause&&!builder.play.mute);
     }
     void buttonLayoutIni() {
         QTemporaryDir tmp; const QString path=tmp.filePath("Game.ini");
@@ -181,12 +185,12 @@ private slots:
         QCOMPARE(effectiveButtonLayout(game,"xbox"),QString("xbox")); QCOMPARE(effectiveButtonLayout(game,"switch"),QString("switch"));
         QCOMPARE(effectiveButtonLayout(game,"bogus"),QString("switch"));
         game.buttonLayout="switch"; QCOMPARE(effectiveButtonLayout(game,"xbox"),QString("switch"));
-        QVERIFY(QFile::remove(path)); QVERIFY2(writeGameSettings(game,"xbox",false,&error),qPrintable(error));
+        QVERIFY(QFile::remove(path)); QVERIFY2(writeGameSettings(game,"xbox",PlaySettings{},&error),qPrintable(error));
         QVERIFY(read().contains("renderer=vulkan")); QVERIFY(read().contains("button_layout=switch"));
-        game.buttonLayout.clear(); QVERIFY(writeGameSettings(game,"xbox",false,&error)); QVERIFY(read().contains("button_layout=xbox")); QVERIFY(!read().contains("button_layout=switch"));
+        game.buttonLayout.clear(); QVERIFY(writeGameSettings(game,"xbox",PlaySettings{},&error)); QVERIFY(read().contains("button_layout=xbox")); QVERIFY(!read().contains("button_layout=switch"));
         // what the game itself wrote into its INI (F11: fullscreen=0) is not Play's to reset
         {QFile f(path); QVERIFY(f.open(QIODevice::Append)); f.write("\r\n[Display]\r\nfullscreen=0\r\n");}
-        QVERIFY(writeGameSettings(game,"xbox",false,&error)); QVERIFY(read().contains("fullscreen=0")); QVERIFY(!read().contains("fullscreen=1"));
+        QVERIFY(writeGameSettings(game,"xbox",PlaySettings{},&error)); QVERIFY(read().contains("fullscreen=0")); QVERIFY(!read().contains("fullscreen=1"));
         QVERIFY(validButtonLayout("") && validButtonLayout("xbox") && !validButtonLayout("label") && !validButtonLayout("nintendo"));
         // the engine's old/alias names are read but never written
         QCOMPARE(normalizeButtonLayout("nintendo"),QString("switch")); QCOMPARE(normalizeButtonLayout("labels"),QString("xbox"));

@@ -326,6 +326,8 @@ bool Library::load(QString* error) {
     buttonLayout = normalizeButtonLayout(o["buttonLayout"].toString());
     if (buttonLayout.isEmpty()) buttonLayout = "switch";
     pauseOnFocusLoss = o["pauseOnFocusLoss"].toBool(false);
+    muteOnFocusLoss = o["muteOnFocusLoss"].toBool(false);
+    docked = o["docked"].toBool(true);
     geometry = QByteArray::fromBase64(o["geometry"].toString().toLatin1());
     dockState = QByteArray::fromBase64(o["dockState"].toString().toLatin1());
     games.clear();
@@ -343,7 +345,7 @@ bool Library::save(QString* error) const {
     for (const auto& g : games) entries.append(g.json());
     QJsonObject o{{"schema", 1}, {"games", entries}, {"toolRoot", toolRoot}, {"toolRootChosen", toolRootChosen}, {"outputRoot", outputRoot}, {"keysPath", keysPath}, {"nxrsBuild", nxrsBuild}, {"jobs", jobs},
         {"viewMode", viewMode}, {"coverWidth", coverWidth}, {"showBackground", showBackground},
-        {"colorMode", colorMode}, {"accentColor", accentColor}, {"buttonLayout", buttonLayout}, {"pauseOnFocusLoss", pauseOnFocusLoss},
+        {"colorMode", colorMode}, {"accentColor", accentColor}, {"buttonLayout", buttonLayout}, {"pauseOnFocusLoss", pauseOnFocusLoss}, {"muteOnFocusLoss", muteOnFocusLoss}, {"docked", docked},
         {"geometry", QString::fromLatin1(geometry.toBase64())}, {"dockState", QString::fromLatin1(dockState.toBase64())}};
     QSaveFile file(path);
     if (!file.open(QIODevice::WriteOnly)) return fail(error, file.errorString());
@@ -870,10 +872,28 @@ bool readPauseOnFocusLoss(const QString& ini) {
     }
     return pause;
 }
-bool writeGameSettings(const Game& game, const QString& launcherLayout, bool pauseOnFocusLoss, QString* error) {
+PlaySettings Library::play() const { return PlaySettings{pauseOnFocusLoss, muteOnFocusLoss, docked}; }
+bool writeMuteOnFocusLoss(const QString& ini, bool mute, QString* error) {
+    return writeIniKey(ini, "Controls", "mute_on_focus_loss", mute ? "1" : "0", error);
+}
+bool readMuteOnFocusLoss(const QString& ini) {
+    QFile file(ini);
+    bool mute = false;
+    if (!file.open(QIODevice::ReadOnly)) return mute;
+    for (const auto& line : QString::fromUtf8(file.readAll()).split('\n')) {
+        const auto trimmed = line.trimmed();
+        if (trimmed.startsWith("mute_on_focus_loss=")) mute = trimmed.mid(19).trimmed() == "1";
+    }
+    return mute;
+}
+bool writePlaySettings(const QString& ini, const PlaySettings& play, QString* error) {
+    return writePauseOnFocusLoss(ini, play.pause, error) && writeMuteOnFocusLoss(ini, play.mute, error)
+        && writeDocked(ini, play.docked, error);
+}
+bool writeGameSettings(const Game& game, const QString& launcherLayout, const PlaySettings& play, QString* error) {
     return writeRenderer(game.iniPath(), game.renderer, error)
         && writeButtonLayout(game.iniPath(), effectiveButtonLayout(game, launcherLayout), error)
-        && writePauseOnFocusLoss(game.iniPath(), pauseOnFocusLoss, error);
+        && writePlaySettings(game.iniPath(), play, error);
 }
 
 bool LibraryFilter::matches(const Game& game, bool running, bool building) const {
