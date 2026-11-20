@@ -127,7 +127,7 @@ QString Game::updateToken() const {
 bool Game::sourceAvailable() const { return !source.isEmpty() && QFileInfo::exists(source); }
 QJsonObject Game::json() const {
     return {{"id", id}, {"title", title}, {"source", source}, {"buildDir", buildDir},
-        {"outputName", outputName}, {"cover", cover}, {"background", background}, {"renderer", renderer}, {"buttonLayout", buttonLayout}, {"pauseOnFocusLoss", pauseOnFocusLoss},
+        {"outputName", outputName}, {"cover", cover}, {"background", background}, {"renderer", renderer}, {"buttonLayout", buttonLayout},
         {"workers", workers}, {"optimization", optimization},
         {"builtSource", builtSource}, {"buildIncomplete", buildIncomplete}, {"lastPlayed", lastPlayed.toString(Qt::ISODate)},
         {"lastBuilt", lastBuilt.toString(Qt::ISODate)}, {"dlc", QJsonArray::fromStringList(dlc)},
@@ -144,8 +144,8 @@ Game Game::fromJson(const QJsonObject& o) {
     g.optimization = qBound(0, o["optimization"].toInt(2), 3);
     if (g.renderer != "vulkan" && g.renderer != "opengl") g.renderer = "opengl";
     g.buttonLayout = normalizeButtonLayout(o["buttonLayout"].toString());
-    g.pauseOnFocusLoss = o["pauseOnFocusLoss"].toString();
-    if (g.pauseOnFocusLoss != "0" && g.pauseOnFocusLoss != "1") g.pauseOnFocusLoss.clear();
+    // a per-game "pauseOnFocusLoss" (a launcher of 382ff33 wrote one) is not read: the setting is global, and the next
+    // save leaves it out
     g.engine = o["engine"].toString() == engineNxrs ? engineNxrs : engineTurbo;   // absent (an older library): Turbo
     g.builtSource = o["builtSource"].toString();
     g.savesOffered = o["savesOffered"].toString();
@@ -857,9 +857,6 @@ bool writeButtonLayout(const QString& ini, const QString& layout, QString* error
     if (layout != "switch" && layout != "xbox") return fail(error, "Unknown controller layout.");
     return writeIniKey(ini, "Controls", "button_layout", layout, error);
 }
-bool effectivePauseOnFocusLoss(const Game& game, bool launcherDefault) {
-    return game.pauseOnFocusLoss.isEmpty() ? launcherDefault : game.pauseOnFocusLoss == "1";
-}
 bool writePauseOnFocusLoss(const QString& ini, bool pause, QString* error) {
     return writeIniKey(ini, "Controls", "pause_on_focus_loss", pause ? "1" : "0", error);
 }
@@ -873,10 +870,10 @@ bool readPauseOnFocusLoss(const QString& ini) {
     }
     return pause;
 }
-bool writeGameSettings(const Game& game, const QString& launcherLayout, QString* error, bool launcherPause) {
+bool writeGameSettings(const Game& game, const QString& launcherLayout, bool pauseOnFocusLoss, QString* error) {
     return writeRenderer(game.iniPath(), game.renderer, error)
         && writeButtonLayout(game.iniPath(), effectiveButtonLayout(game, launcherLayout), error)
-        && writePauseOnFocusLoss(game.iniPath(), effectivePauseOnFocusLoss(game, launcherPause), error);
+        && writePauseOnFocusLoss(game.iniPath(), pauseOnFocusLoss, error);
 }
 
 bool LibraryFilter::matches(const Game& game, bool running, bool building) const {

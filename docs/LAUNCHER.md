@@ -190,10 +190,11 @@ tools, Python, and .NET 10. The launcher checks the latter tools and reports mis
 launching a Vulkan game with no shader translator.
 
 **Pause the game when its window is in the background** (the engine's `pause_on_focus_loss` key, `[Controls]`):
-a plain checkbox in **Properties → Runtime** per game and in **Settings → Play** as the default for every game without a
-choice of its own. Off by default: a game keeps running while another window has focus, as a PC game does. The
-launcher writes the effective value into the game INI at build and Play, and right away for built games when either
-checkbox changes (`library.json`: `pauseOnFocusLoss`, per game `"0"`/`"1"` or absent to inherit).
+one plain checkbox in **Settings → Play**, for every game (there is no per-game choice). Off by default: a game keeps
+running while another window has focus, as a PC game does. The launcher writes the value into the game INI when a
+build succeeds and at Play, and into every built game's INI right away when the checkbox changes (`library.json`:
+top-level `pauseOnFocusLoss`; a per-game `pauseOnFocusLoss` written by an earlier launcher is ignored on load and
+left out at the next save).
 
 **Settings → Controller** sets the default controller button layout, the engine's `button_layout` INI key:
 **Switch** (by position like the Switch pad: right = A, bottom = B; on a PlayStation pad Circle = A, Cross = B) or

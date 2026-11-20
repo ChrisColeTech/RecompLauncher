@@ -34,7 +34,7 @@ BuildManager::BuildManager(QObject* parent) : QObject(parent) {
         if (!game.hasBuild()) { complete(false, "The recompiler exited successfully but the expected build files are missing."); return; }
         QString error;
         // Window::startBuild resolved the inherited controller layout into this copy
-        if (!writeGameSettings(game, game.buttonLayout, &error)) { complete(false, "Build completed, but settings could not be saved: " + error); return; }
+        if (!writeGameSettings(game, game.buttonLayout, pauseOnFocusLoss, &error)) { complete(false, "Build completed, but settings could not be saved: " + error); return; }
         complete(true, "Build complete. Your game is ready to play.");
     });
 }
