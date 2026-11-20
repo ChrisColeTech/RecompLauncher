@@ -12,6 +12,7 @@
 #include <QScopeGuard>
 #include <QTemporaryDir>
 #include <QtTest>
+#include <QProcessEnvironment>
 #include <cmath>
 
 class LauncherTests : public QObject {
@@ -440,6 +441,22 @@ private slots:
         const auto game=gameFromSource(path);QCOMPARE(game.format(),QString("DIRECT NSP"));QVERIFY(inPlacePackage(path));
         LibraryFilter filter;filter.source=1;QVERIFY(filter.matches(game));
     }
+    void xciSourceIsAnNxrsGame(){
+        // a card image as the game's package: with or without the 0x1000-byte key area; only nxrs builds it
+        QTemporaryDir tmp;QString error;
+        for(const qint64 at:{0x100,0x1100}){
+            const QString path=tmp.filePath(QString("Party [%1].xci").arg(at));
+            {QFile file(path);QVERIFY(file.open(QIODevice::WriteOnly));file.write(QByteArray(at,'\0'));file.write("HEAD");file.write(QByteArray(0x100,'\0'));}
+            QVERIFY2(validSource(path,&error),qPrintable(error));
+            const auto game=gameFromSource(path);QCOMPARE(game.format(),QString("DIRECT XCI"));QVERIFY(inPlacePackage(path));
+            QVERIFY(game.nxrs());QVERIFY(game.buildDir.endsWith(" [nxrs]"));QCOMPARE(game.title,QString("Party"));
+        }
+        const QString bad=tmp.filePath("Not a card.xci");writeFile(bad,QByteArray(0x200,'x'));QVERIFY(!validSource(bad,&error));QVERIFY(error.contains("XCI"));
+        // Turbo refuses a card image before anything runs
+        Game turbo=gameFromSource(tmp.filePath("Party [256].xci"));QVERIFY(setGameEngine(turbo,engineTurbo));
+        BuildManager builder;Toolchain tools;tools.nxrsBuild="x";tools.nxrsContract=2;
+        QVERIFY(!builder.start(turbo,tools,4,&error));QVERIFY2(error.contains("XCI"),qPrintable(error));
+    }
     void engineChoicePerGame(){
         QTemporaryDir tmp;const QString source=tmp.filePath("Kart [v0].nsp");writeFile(source,"PFS0");
         Game game=gameFromSource(source);QCOMPARE(game.engine,QString(engineTurbo));QVERIFY(!game.nxrs());
@@ -501,6 +518,62 @@ private slots:
         Toolchain none;none.keys=tools.keys;QVERIFY(!installer.start(game,none,&error));QVERIFY(error.contains("nxrs-build"));
 #endif
     }
+    void nxrsDoctorChecks(){
+        // the output format of nxrs-build doctor: "ok   <check>", "FAIL <check>", notes indented
+        const auto d=parseNxrsDoctor("ok   CPU: AVX2\r\n     toolchain: llvm-mingw\r\nFAIL Vulkan: no device\r\nok   free disk for builds (D:\\x): 10.0 GB\r\n",1);
+        QCOMPARE(d.checks.size(),3);QCOMPARE(d.failed(),1);QVERIFY(!d.ok());QCOMPARE(d.notes,QStringList("toolchain: llvm-mingw"));
+        QCOMPARE(d.checks[1].text,QString("Vulkan: no device"));QVERIFY(d.text().contains(QString("\u2717 Vulkan: no device")));
+        QVERIFY(parseNxrsDoctor("ok   one\n",0).ok());QVERIFY(!parseNxrsDoctor("nxrs-build: unknown command\n",2).error.isEmpty());
+        QVERIFY(!runNxrsDoctor({},QProcessEnvironment::systemEnvironment()).error.isEmpty());
+#ifdef Q_OS_WIN
+        // this test binary answers `doctor` as nxrs-build does (main() below): one check fails, exit code 1
+        const auto run=runNxrsDoctor(QCoreApplication::applicationFilePath(),QProcessEnvironment::systemEnvironment());
+        QVERIFY2(run.error.isEmpty(),qPrintable(run.error));QCOMPARE(run.exitCode,1);QCOMPARE(run.checks.size(),4);QCOMPARE(run.failed(),1);
+        QVERIFY(run.checks[2].text.startsWith("Vulkan device: Old GPU"));QVERIFY(run.checks[3].text.contains("120.5 GB"));
+        // the real engine, when the developer names it (NXRS_DOCTOR_EXE): it answers in the same format
+        if(const QString real=qEnvironmentVariable("NXRS_DOCTOR_EXE");!real.isEmpty()){
+            const auto r=runNxrsDoctor(real,QProcessEnvironment::systemEnvironment());
+            QVERIFY2(r.error.isEmpty(),qPrintable(r.error));QVERIFY(r.checks.size()>=5);
+            qInfo("%s",qPrintable(r.text()));
+        }
+#endif
+    }
+    void savesCopyBetweenEngines(){
+        QTemporaryDir tmp;const QString source=tmp.filePath("Kart.nsp");writeFile(source,"PFS0");
+        Game game=gameFromSource(source);game.buildDir=tmp.filePath("builds/Kart");game.outputName="Kart";
+        const QString turboSave=saveFolder(game.buildDir,game.outputName),nxrsDir=buildFolderFor(game.buildDir,engineNxrs),nxrsSave=saveFolder(nxrsDir,game.outputName);
+        // Turbo's build: one folder per save type; nxrs's: one per account, with a stale transaction folder beside user1
+        writeFile(turboSave+"/user/progress.dat","turbo progress");writeFile(turboSave+"/user/sub/options.bin","turbo options");
+        writeFile(turboSave+"/device/device.bin","turbo device");writeFile(turboSave+"/temp/scratch","temporary");writeFile(turboSave+"/bcat/news","bcat");
+        writeFile(nxrsSave+"/user1/progress.dat","nxrs progress");writeFile(nxrsSave+"/user1.new/progress.dat","half-committed");
+        QVERIFY(setGameEngine(game,engineNxrs));QCOMPARE(game.buildDir,nxrsDir);
+        QVERIFY(otherBuildHasSaves(game));
+        QString backup,report,error;
+        QVERIFY2(copySavesFromOtherEngine(game,&backup,&report,&error),qPrintable(error));
+        const auto read=[](const QString& path){QFile f(path);return f.open(QIODevice::ReadOnly)?f.readAll():QByteArray("<missing>");};
+        QCOMPARE(read(nxrsSave+"/user1/progress.dat"),QByteArray("turbo progress"));QCOMPARE(read(nxrsSave+"/user1/sub/options.bin"),QByteArray("turbo options"));
+        QCOMPARE(read(nxrsSave+"/device/device.bin"),QByteArray("turbo device"));
+        QVERIFY(!QFileInfo::exists(nxrsSave+"/temp"));QVERIFY(!QFileInfo::exists(nxrsSave+"/bcat"));QVERIFY(!QFileInfo::exists(nxrsSave+"/user1.new"));
+        // the backup holds this build's saves as they were; the source is untouched
+        QVERIFY(!backup.isEmpty());QCOMPARE(read(backup+"/user1/progress.dat"),QByteArray("nxrs progress"));QCOMPARE(read(backup+"/user1.new/progress.dat"),QByteArray("half-committed"));
+        QCOMPARE(read(turboSave+"/user/progress.dat"),QByteArray("turbo progress"));QVERIFY(report.contains("user1"));
+        // the other way: nxrs's first account into Turbo's user folder (cache0 -> cache)
+        writeFile(nxrsSave+"/cache0/c.bin","nxrs cache");writeFile(nxrsSave+"/user1/progress.dat","nxrs newer");writeFile(turboSave+"/user/only-turbo.bin","x");
+        QVERIFY(setGameEngine(game,engineTurbo));QVERIFY(otherBuildHasSaves(game));
+        QVERIFY2(copySavesFromOtherEngine(game,&backup,&report,&error),qPrintable(error));
+        QCOMPARE(read(turboSave+"/user/progress.dat"),QByteArray("nxrs newer"));QVERIFY(!QFileInfo::exists(turboSave+"/user/only-turbo.bin"));
+        QCOMPARE(read(turboSave+"/cache/c.bin"),QByteArray("nxrs cache"));QCOMPARE(read(backup+"/user/only-turbo.bin"),QByteArray("x"));
+        QCOMPARE(read(turboSave+"/temp/scratch"),QByteArray("temporary"));   // not part of the copy: left as it was
+        // Turbo's runtimes before the split kept the user saves in save/system
+        QTemporaryDir old;Game legacy=gameFromSource(source);legacy.buildDir=old.filePath("Kart");legacy.outputName="Kart";
+        writeFile(saveFolder(legacy.buildDir,"Kart")+"/system/slot0","old turbo");
+        QVERIFY(setGameEngine(legacy,engineNxrs));QVERIFY(!copySavesFromOtherEngine(legacy,&backup,&report,&error));QVERIFY(error.contains("Build the game"));
+        QVERIFY(QDir().mkpath(legacy.dataDir()));QVERIFY2(copySavesFromOtherEngine(legacy,&backup,&report,&error),qPrintable(error));
+        QVERIFY(backup.isEmpty());QCOMPARE(read(saveFolder(legacy.buildDir,"Kart")+"/user1/slot0"),QByteArray("old turbo"));
+        // nothing to copy: refused with the reason; the one-time offer round-trips through the library
+        Game none=gameFromSource(source);none.buildDir=tmp.filePath("none");none.outputName="None";QVERIFY(!otherBuildHasSaves(none));
+        legacy.savesOffered=engineTurbo;QCOMPARE(Game::fromJson(legacy.json()).savesOffered,QString(engineTurbo));
+    }
     void toolEnvironmentCarriesKeys(){
         Toolchain tools;tools.keys="D:/Keys/prod.keys";
         QCOMPARE(tools.environment().value("SWR_PROD_KEYS"),tools.keys);
@@ -511,6 +584,12 @@ int main(int argc,char** argv) {
     if(argc>1&&QByteArray(argv[1])=="-c")return 0;
     // ...and nxrs-build (contract v2): contract, update-info --game <game> [--keys k] <packages>, dlc sync --datadir <d> [--keys k] <packages>
     if(argc==2&&QByteArray(argv[1])=="contract"){printf("nxrs-contract 2\n");fflush(stdout);return 0;}
+    // ...and nxrs-build doctor (its output format, one failing check: a machine without a Vulkan 1.3 driver)
+    if(argc==2&&QByteArray(argv[1])=="doctor"){
+        printf("ok   CPU: AVX2, FMA, BMI2 (the game code is built for x86-64-v3)\r\n     toolchain: clang + Visual Studio's libraries (MSVC ABI)\r\n");
+        printf("ok   Vulkan loader (vulkan-1.dll)\r\nFAIL Vulkan device: Old GPU - Vulkan 1.2.0, driver 1.0 (the engine needs Vulkan 1.3: update the graphics driver)\r\n");
+        printf("ok   free disk for builds (C:\\nxrs): 120.5 GB\r\n");fflush(stdout);return 1;
+    }
     if(argc>3&&QByteArray(argv[1])=="update-info"){
         int failed=0;
         for(int i=4;i<argc;++i){

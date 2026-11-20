@@ -23,7 +23,8 @@ only the EXE. The engine is found by walking up from the launcher's directory un
 
 ## Add, build, play
 
-1. **Add game:** select a `.nup`, `.nsp` (also one that holds the game with its update and DLC), or `.nro`, or drop it into the library. The dropdown also accepts extracted
+1. **Add game:** select a `.nup`, `.nsp` (also one that holds the game with its update and DLC), `.xci` (a card image,
+   with or without its key area; built by the nxrs engine only, so the entry starts on it) or `.nro`, or drop it into the library. The dropdown also accepts extracted
    game folders and existing native builds.
 2. In the add dialog, choose the display name under **General** and build location under **Build**, then click
    **Add game**. Later use the card's sliders button or **Alt+Enter** for Properties; save edits with **OK**.
@@ -52,6 +53,22 @@ engine checkout's `target\release\nxrs-build.exe`), then `nxrs-engine\nxrs-build
 release. The **Engine ready** badge counts only the engines the library's games use; its popup lists both.
 From the command line: `nxrs --select-title <game> --engine nxrs|turbo` (saved; combine with `--build`,
 `--install-dlc`, `--install-update`, …) and `--nxrs-build <exe>` (saved in the library).
+
+**Checks (`nxrs-build doctor`).** **Settings > Engine > nxrs checks** runs `nxrs-build doctor` when the page opens (and
+on **Check again**) and lists each check with a tick or a cross: CPU (AVX2, FMA, BMI2), the toolchain it will use,
+the compiler, Visual Studio's libraries, the runtime and engine libraries, the Vulkan loader, every Vulkan device
+with its API and driver version (1.3 needed), free disk for builds and for temporary files, and the keys. From the
+command line: `nxrs --nxrs-doctor` prints the same list and exits 0 when every check passes, 1 otherwise.
+
+**Saves between the two builds.** Both engines keep a game's saves in `<name>_data\save\` of their own build folder,
+in different layouts: Turbo has one folder per save type (`user` for every account, `device`, `cache`, `bcat`,
+`temp`; its runtimes before the split kept everything in `system`), nxrs one folder per account (`user1` is the first),
+`device`, `cache<n>`, `temp` (and `user1.work` / `.new` / `.old` while a game commits). **Game > Copy saves from the
+Turbo build…** (or **from the nxrs build…**, whichever engine the game is not on now) copies `user` ↔ `user1` (Turbo's
+`system` when it has no `user`), `device` ↔ `device` and `cache` ↔ `cache0`; temporary data and BCAT stay. This
+build's whole save folder is first copied to `save-backup-<yyyyMMdd-HHmmss>` beside it; the other build is only read.
+After a switch, the first **Play** of a build whose other build has saves asks once (`library.json` `savesOffered`
+remembers it). `nxrs --select-title <game> --copy-saves` does the copy without dialogs (exit code 0 / 1).
 
 ### DLC (add-on content)
 
@@ -104,7 +121,9 @@ marked as needing a build rather than treating partially overwritten artifacts a
 
 ### Supported inputs and keys
 
-The package picker explicitly offers `*.nup *.nsp *.nro`. The launcher checks a `.nsp` for PFS0 magic and labels it
+The package picker explicitly offers `*.nup *.nsp *.xci *.nro`. A `.xci` is checked for its card header ("HEAD" at
+0x100, or at 0x1100 after a key area), labelled **DIRECT XCI**, put on the nxrs engine (Turbo refuses a card image as
+the game, and the build says so if the entry is switched back) and needs `prod.keys`, as an NSP does. The launcher checks a `.nsp` for PFS0 magic and labels it
 **DIRECT NSP**. This is an import check, not full package validation. The recompiler supports application NSPs with
 plaintext or AES-CTR encrypted ExeFS and RomFS, and combined packages that hold the game and its update (the update's
 BKTR patch is applied in place; a package's DLC joins the game's DLC list on the first build). Update-only packages,
@@ -269,6 +288,12 @@ Both frontend builds need an existing toolkit runtime to compile games. See
 
 ## Verification
 
+Contract v2 additions (2026-11-20, lane Q; scratch build of `src/launcher` in a folder of its own, a temporary library):
+`launcher-tests` 32/32 (`nxrsDoctorChecks`: the doctor's format, a failing check, the exit code, through the test
+binary standing in for nxrs-build, and the real nxrs-build when `NXRS_DOCTOR_EXE` names it;
+`savesCopyBetweenEngines`: both directions, the backup, Turbo's old `system` folder, nxrs's transaction folders;
+`xciSourceIsAnNxrsGame`), `launcher-ui-tests` 10/10 (the Game menu with **Copy saves**).
+
 ```powershell
 & ".\.venv\Scripts\python.exe" third_party\Switch2RECOMP\tests\test_python_selection.py -v
 & ".\.venv\Scripts\python.exe" third_party\Switch2RECOMP\tests\test_launcher_workflow.py LauncherWorkflow.test_import_existing_build_without_compiling
@@ -309,6 +334,17 @@ Verification for these docs (November 15, 2026):
 | CLI `scripts\build-from-nup.bat` + game run | Output contract produced; runtime booted (audio, in-place RomFS, OpenGL), guest module executed |
 
 ## Release integration
+
+**The nxrs engine in a release (release.yml, off by default).** The engine repository (ChrisColeTech/nxrs-engine) is
+private and this one is public, so the Windows job bundles it only when asked: a manual run with the `nxrs_engine`
+input, or a push when the repository variable `NXRS_ENGINE_IN_RELEASE` is `true`. Then it checks the engine out at
+`NXRS_ENGINE_REF` (variable, default `main`) with the secret `NXRS_ENGINE_TOKEN`, builds `nxrs-build`, the MSVC
+engine (`nxfront.lib`, `nxrt.lib`) and the gnullvm engine (llvm-mingw 20261104), and passes `--nxrs-engine`,
+`--nxrs-target`, `--nxrs-gnu` to package-release.py. Nothing changes in a release until the owner sets those.
+
+**Renderer choice (owner decision, not changed):** Properties > Runtime still offers OpenGL for every game; an nxrs
+build has only the Vulkan renderer and runs `renderer=opengl` as Vulkan without saying so (engine
+`config/options.rs`).
 
 The launcher is a frontend, not a replacement for the toolkit. A Windows release should contain this deployed
 Qt folder together with the toolkit's `switchrecomp.py` and its Python modules (`nup.py`, `nsp.py`, `nca.py`, `dlc.py`,

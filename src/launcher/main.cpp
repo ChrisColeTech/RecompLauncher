@@ -72,6 +72,10 @@ int main(int argc, char** argv) {
     parser.addOption({"show-dlc", "Open the selected game's DLC window (Game > Install DLC…)"});
     parser.addOption({"show-menu", "Open a menu of the title bar (File, Game, Keys, View, Help)", "name"});
     parser.addOption({"screenshot", "Save a launcher preview and exit", "png"});
+    parser.addOption({"screenshot-delay", "Milliseconds before --screenshot grabs the window (default 1100)", "ms"});
+    parser.addOption({"show-engine-settings", "Open Settings > Engine (nxrs-build doctor runs there)"});
+    parser.addOption({"nxrs-doctor", "Run nxrs-build doctor for the configured nxrs-build, print its checks and exit (0 = all ok)"});
+    parser.addOption({"copy-saves", "Copy the --select-title game's saves from its build with the other engine (backup first) and exit"});
     parser.addOption({"smoke-build", "Build a synthetic test input and exit (diagnostics)", "input"});
     parser.addOption({"build-output", "Output folder for --smoke-build", "directory"});
     parser.process(app);
@@ -124,6 +128,21 @@ int main(int argc, char** argv) {
     if(parser.isSet("show-filters")) QTimer::singleShot(0,&window,[&window]{window.showFilters();});
     if(parser.isSet("show-appearance")) QTimer::singleShot(0,&window,[&window]{window.showAppearance();});
     if(parser.isSet("show-controller")) QTimer::singleShot(0,&window,[&window]{window.showControllerSettings();});
+    if(parser.isSet("show-engine-settings")) QTimer::singleShot(0,&window,[&window]{window.showEngineSettings();});
+    if(parser.isSet("nxrs-doctor")) {
+        QTimer::singleShot(0,&window,[&window]{
+            const auto d=window.nxrsDoctor();
+            for(const auto& line:d.text().split('\n'))qInfo("%s",qPrintable(line));
+            QApplication::exit(d.ok()?0:1);
+        });
+    }
+    if(parser.isSet("copy-saves")) {
+        QObject::connect(&window,&Window::saveCopyFinished,&app,[](bool okay,const QString& detail){
+            for(const auto& line:detail.split('\n',Qt::SkipEmptyParts)){if(okay)qInfo("Saves: %s",qPrintable(line));else qCritical("Saves error: %s",qPrintable(line));}
+            QApplication::exit(okay?0:1);
+        });
+        QTimer::singleShot(0,&window,[&window]{window.copySaves(false);});
+    }
     if(parser.isSet("smoke-build")) {
         QObject::connect(&window,&Window::smokeFinished,&app,[](bool okay){QApplication::exit(okay?0:1);});
         QTimer::singleShot(0,&window,[&] {
@@ -132,7 +151,7 @@ int main(int argc, char** argv) {
         });
     }
     if(parser.isSet("screenshot")) {
-        QTimer::singleShot(1100,&window,[&] {
+        QTimer::singleShot(parser.isSet("screenshot-delay")?parser.value("screenshot-delay").toInt():1100,&window,[&] {
             const QString path=QFileInfo(parser.value("screenshot")).absoluteFilePath();
             QDir().mkpath(QFileInfo(path).absolutePath());
             QWidget* target=QApplication::activeModalWidget();if(!target)target=QApplication::activePopupWidget();if(!target)target=&window;

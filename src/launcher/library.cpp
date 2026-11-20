@@ -3,6 +3,7 @@
 #include "library.h"
 #include <QCoreApplication>
 #include <QDir>
+#include <QDirIterator>
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonArray>
@@ -78,6 +79,7 @@ QString Game::iniPath() const { return QDir(buildDir).filePath(outputName + ".in
 QString Game::format() const {
     if (source.endsWith(".nup", Qt::CaseInsensitive)) return "DIRECT NUP";
     if (source.endsWith(".nsp", Qt::CaseInsensitive)) return "DIRECT NSP";
+    if (source.endsWith(".xci", Qt::CaseInsensitive)) return "DIRECT XCI";
     if (source.endsWith(".nro", Qt::CaseInsensitive)) return "HOMEBREW";
     return source.isEmpty() ? "NATIVE BUILD" : "EXTRACTED";
 }
@@ -130,7 +132,7 @@ QJsonObject Game::json() const {
         {"builtSource", builtSource}, {"buildIncomplete", buildIncomplete}, {"lastPlayed", lastPlayed.toString(Qt::ISODate)},
         {"lastBuilt", lastBuilt.toString(Qt::ISODate)}, {"dlc", QJsonArray::fromStringList(dlc)},
         {"updates", [this] { QJsonArray list; for (const auto& u : updates) list.append(QJsonObject{{"path", u.path}, {"titleId", u.titleId}, {"version", u.version}, {"display", u.display}}); return list; }()},
-        {"updateChoice", updateChoice}, {"builtUpdate", builtUpdate}, {"engine", engine}};
+        {"updateChoice", updateChoice}, {"builtUpdate", builtUpdate}, {"engine", engine}, {"savesOffered", savesOffered}};
 }
 Game Game::fromJson(const QJsonObject& o) {
     Game g;
@@ -144,6 +146,7 @@ Game Game::fromJson(const QJsonObject& o) {
     g.buttonLayout = normalizeButtonLayout(o["buttonLayout"].toString());
     g.engine = o["engine"].toString() == engineNxrs ? engineNxrs : engineTurbo;   // absent (an older library): Turbo
     g.builtSource = o["builtSource"].toString();
+    g.savesOffered = o["savesOffered"].toString();
     g.buildIncomplete = o["buildIncomplete"].toBool();
     g.lastPlayed = QDateTime::fromString(o["lastPlayed"].toString(), Qt::ISODate);
     g.lastBuilt = QDateTime::fromString(o["lastBuilt"].toString(), Qt::ISODate);
@@ -557,7 +560,12 @@ bool validSource(const QString& source, QString* error) {
     if (info.suffix().compare("nup", Qt::CaseInsensitive) == 0 && header.startsWith(QByteArray("NUP\1", 4))) return true;
     if (info.suffix().compare("nsp", Qt::CaseInsensitive) == 0 && header.startsWith("PFS0")) return true;
     if (info.suffix().compare("nro", Qt::CaseInsensitive) == 0 && header.mid(0x10, 4) == "NRO0") return true;
-    return fail(error, "Select an indexed NUP, a standard application NSP, an NRO, or an extracted ExeFS folder.");
+    // a card image: its header ("HEAD" at 0x100) after the 0x1000-byte key area when the dump kept it
+    if (info.suffix().compare("xci", Qt::CaseInsensitive) == 0) {
+        for (const qint64 at : {0x100, 0x1100}) if (file.seek(at) && file.read(4) == "HEAD") return true;
+        return fail(error, info.fileName() + " is not a card image (no XCI header).");
+    }
+    return fail(error, "Select an indexed NUP, a standard application NSP, a card image (XCI), an NRO, or an extracted ExeFS folder.");
 }
 Game gameFromSource(const QString& source, const QString& outputRoot) {
     Game g;
@@ -565,6 +573,8 @@ Game gameFromSource(const QString& source, const QString& outputRoot) {
     g.source = absolute(source); g.title = titleForSource(source); g.outputName = outputNameFor(g.title);
     const QString base = outputRoot.isEmpty() ? QDir(QFileInfo(source).absolutePath()).filePath("SwitchRecomp Builds") : outputRoot;
     g.buildDir = QDir(base).filePath(g.outputName);
+    // only the nxrs engine reads a card image as the game's package (Turbo refuses it)
+    if (source.endsWith(".xci", Qt::CaseInsensitive)) { g.engine = engineNxrs; g.buildDir = buildFolderFor(g.buildDir, engineNxrs); }
     return g;
 }
 // The package a build reads its data from, as its data folder's marker names it (empty: none, or a folder build).
@@ -625,6 +635,129 @@ QStringList nxrsDlcSyncArguments(const Game& game, const QString& keys) {
     if (!keys.isEmpty() && QFileInfo(keys).isFile()) arguments << "--keys" << QDir::toNativeSeparators(keys);
     for (const auto& package : game.dlc) arguments << QDir::toNativeSeparators(package);
     return arguments;
+}
+int NxrsDoctor::failed() const {
+    int n = 0;
+    for (const auto& c : checks) n += !c.ok;
+    return n;
+}
+QString NxrsDoctor::text() const {
+    QStringList lines;
+    if (!error.isEmpty()) lines << error;
+    for (const auto& c : checks) lines << QString(c.ok ? "\u2713 " : "\u2717 ") + c.text;
+    for (const auto& n : notes) lines << "   " + n;
+    return lines.join('\n');
+}
+NxrsDoctor parseNxrsDoctor(const QString& output, int exitCode) {
+    NxrsDoctor d;
+    d.exitCode = exitCode;
+    for (QString line : output.split('\n')) {
+        line.remove('\r');
+        if (line.trimmed().isEmpty() || line.startsWith('@')) continue;
+        if (line.startsWith("ok ")) d.checks.append({true, line.mid(3).trimmed()});
+        else if (line.startsWith("FAIL ")) d.checks.append({false, line.mid(5).trimmed()});
+        else d.notes << line.trimmed();
+    }
+    if (d.checks.isEmpty()) d.error = "nxrs-build doctor printed no checks (an engine older than the doctor command?)";
+    return d;
+}
+NxrsDoctor runNxrsDoctor(const QString& nxrsBuild, const QProcessEnvironment& environment, int timeoutMs) {
+    NxrsDoctor d;
+    if (nxrsBuild.isEmpty() || !QFileInfo(nxrsBuild).isFile()) { d.error = "nxrs-build not found"; return d; }
+    QProcess p;
+    p.setProgram(nxrsBuild); p.setArguments(nxrsDoctorArguments());
+    p.setWorkingDirectory(QFileInfo(nxrsBuild).absolutePath());
+    p.setProcessEnvironment(environment); p.setProcessChannelMode(QProcess::MergedChannels);
+    p.start();
+    if (!p.waitForStarted(10000)) { d.error = "nxrs-build doctor did not start: " + p.errorString(); return d; }
+    if (!p.waitForFinished(timeoutMs)) { p.kill(); p.waitForFinished(2000); d.error = "nxrs-build doctor did not finish in time"; return d; }
+    return parseNxrsDoctor(QString::fromUtf8(p.readAll()), p.exitStatus() == QProcess::NormalExit ? p.exitCode() : -1);
+}
+
+QString saveFolder(const QString& buildDir, const QString& outputName) {
+    return QDir(QDir(buildDir).filePath(outputName + "_data")).filePath("save");
+}
+QVector<SaveFolderPair> saveCopyPlan(const QString& fromSave, const QString& fromEngine, const QString& toSave) {
+    const QDir from(fromSave), to(toSave);
+    const auto has = [&](const QString& name) { return QDir(from.filePath(name)).exists(); };
+    QVector<SaveFolderPair> plan;
+    if (fromEngine == engineNxrs) {   // nxrs -> Turbo
+        if (has("user1")) plan.append({from.filePath("user1"), to.filePath("user")});
+        if (has("device")) plan.append({from.filePath("device"), to.filePath("device")});
+        if (has("cache0")) plan.append({from.filePath("cache0"), to.filePath("cache")});
+    } else {                          // Turbo -> nxrs
+        if (has("user")) plan.append({from.filePath("user"), to.filePath("user1")});
+        else if (has("system")) plan.append({from.filePath("system"), to.filePath("user1")});
+        if (has("device")) plan.append({from.filePath("device"), to.filePath("device")});
+        if (has("cache")) plan.append({from.filePath("cache"), to.filePath("cache0")});
+    }
+    return plan;
+}
+static QString otherEngine(const Game& game) { return game.nxrs() ? QString(engineTurbo) : QString(engineNxrs); }
+static QString otherSaveFolder(const Game& game) {
+    return saveFolder(buildFolderFor(game.buildDir, otherEngine(game)), game.outputName);
+}
+static bool folderHasFiles(const QString& path) {
+    QDirIterator it(path, QDir::Files | QDir::Hidden, QDirIterator::Subdirectories);
+    return it.hasNext();
+}
+bool otherBuildHasSaves(const Game& game) {
+    if (game.buildDir.isEmpty() || game.outputName.isEmpty()) return false;
+    for (const auto& pair : saveCopyPlan(otherSaveFolder(game), otherEngine(game), saveFolder(game.buildDir, game.outputName)))
+        if (folderHasFiles(pair.from)) return true;
+    return false;
+}
+static bool copyTree(const QString& from, const QString& to, int* files, QString* error) {
+    if (!QDir().mkpath(to)) return fail(error, "Cannot create " + QDir::toNativeSeparators(to));
+    QDirIterator it(from, QDir::Files | QDir::Dirs | QDir::Hidden | QDir::NoDotAndDotDot, QDirIterator::Subdirectories);
+    while (it.hasNext()) {
+        const QString path = it.next();
+        const QString target = QDir(to).filePath(QDir(from).relativeFilePath(path));
+        if (it.fileInfo().isDir()) {
+            if (!QDir().mkpath(target)) return fail(error, "Cannot create " + QDir::toNativeSeparators(target));
+        } else {
+            QDir().mkpath(QFileInfo(target).absolutePath());
+            if (QFileInfo::exists(target) && !QFile::remove(target)) return fail(error, "Cannot replace " + QDir::toNativeSeparators(target));
+            if (!QFile::copy(path, target)) return fail(error, "Cannot copy " + QDir::toNativeSeparators(path));
+            if (files) ++*files;
+        }
+    }
+    return true;
+}
+bool copySavesFromOtherEngine(const Game& game, QString* backup, QString* report, QString* error) {
+    if (backup) backup->clear();
+    if (report) report->clear();
+    const QString fromEngine = otherEngine(game);
+    const QString fromSave = otherSaveFolder(game), toSave = saveFolder(game.buildDir, game.outputName);
+    if (!QDir(game.dataDir()).exists()) return fail(error, "Build the game with this engine first: its data folder does not exist yet.");
+    const auto plan = saveCopyPlan(fromSave, fromEngine, toSave);
+    bool any = false;
+    for (const auto& pair : plan) any = any || folderHasFiles(pair.from);
+    if (!any) return fail(error, QString("The %1 build has no saves to copy (%2).").arg(fromEngine == engineNxrs ? "nxrs" : "Turbo", QDir::toNativeSeparators(fromSave)));
+    // the backup: this build's whole save folder, as it is, before anything in it changes
+    if (QDir(toSave).exists() && folderHasFiles(toSave)) {
+        const QString target = QDir(QFileInfo(toSave).absolutePath()).filePath("save-backup-" + QDateTime::currentDateTime().toString("yyyyMMdd-HHmmss"));
+        if (QFileInfo::exists(target)) return fail(error, "A backup with this time already exists: " + QDir::toNativeSeparators(target));
+        int n = 0;
+        if (!copyTree(toSave, target, &n, error)) return false;
+        if (backup) *backup = target;
+    }
+    QStringList lines;
+    for (const auto& pair : plan) {
+        if (!folderHasFiles(pair.from)) continue;
+        // nxrs's transaction folders beside the destination would be taken for an unfinished commit
+        for (const char* suffix : {".work", ".new", ".old"}) {
+            QDir stale(pair.to + suffix);
+            if (stale.exists() && !stale.removeRecursively()) return fail(error, "Cannot remove " + QDir::toNativeSeparators(stale.path()));
+        }
+        QDir dest(pair.to);
+        if (dest.exists() && !dest.removeRecursively()) return fail(error, "Cannot replace " + QDir::toNativeSeparators(pair.to));
+        int n = 0;
+        if (!copyTree(pair.from, pair.to, &n, error)) return false;
+        lines << QString("%1 -> %2 (%3 file%4)").arg(QDir::toNativeSeparators(pair.from), QDir::toNativeSeparators(pair.to)).arg(n).arg(n == 1 ? "" : "s");
+    }
+    if (report) *report = lines.join('\n');
+    return true;
 }
 bool gameFromExecutable(const QString& path, Game* game, QString* error) {
     if (!QFileInfo(path).isFile()) return fail(error, "The executable does not exist.");
@@ -740,7 +873,7 @@ bool LibraryFilter::matches(const Game& game, bool running, bool building) const
     return true;
 }
 bool inPlacePackage(const QString& path) {
-    return path.endsWith(".nup", Qt::CaseInsensitive) || path.endsWith(".nsp", Qt::CaseInsensitive);
+    return path.endsWith(".nup", Qt::CaseInsensitive) || path.endsWith(".nsp", Qt::CaseInsensitive) || path.endsWith(".xci", Qt::CaseInsensitive);
 }
 int LibraryFilter::activeCount() const { return (!text.trimmed().isEmpty() ? 1 : 0) + (state != 0 ? 1 : 0) + (source != 0 ? 1 : 0); }
 

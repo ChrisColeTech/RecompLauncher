@@ -57,6 +57,8 @@ struct Game {
     int workers = 0; // Zero inherits the launcher default.
     int optimization = 2;
     QDateTime lastPlayed, lastBuilt;
+    // The engine whose saves were offered to this build once (copy saves between Turbo and nxrs): not offered again.
+    QString savesOffered;
     QString executable() const;
     QString codeModule() const;
     QString dataDir() const;
@@ -144,6 +146,44 @@ bool builtWithNxrs(const QString& buildDir, const QString& outputName);
 QStringList nxrsBuildArguments(const Game& game, const QString& keys, int jobs);
 QStringList nxrsUpdateInfoArguments(const Game& game, const QString& keys, const QStringList& packages);
 QStringList nxrsDlcSyncArguments(const Game& game, const QString& keys);
+
+// `nxrs-build doctor`: what nxrs-build checks on this machine (CPU, toolchain, compiler, engine libraries, Vulkan
+// devices, free disk, keys), one "ok   <check>" / "FAIL <check>" line each; other lines are notes. Exit 0 = all ok.
+struct DoctorCheck {
+    bool ok = false;
+    QString text;
+};
+struct NxrsDoctor {
+    QVector<DoctorCheck> checks;
+    QStringList notes;
+    int exitCode = -1;
+    QString error;   // nxrs-build did not run or did not finish
+    bool ok() const { return error.isEmpty() && exitCode == 0 && !checks.isEmpty(); }
+    int failed() const;
+    QString text() const;   // one line per check, "✓"/"✗" first, notes as they came
+};
+inline QStringList nxrsDoctorArguments() { return {"doctor"}; }
+NxrsDoctor parseNxrsDoctor(const QString& output, int exitCode);
+// Runs nxrs-build doctor and waits (Settings runs the same arguments without waiting; tests and --nxrs-doctor wait).
+NxrsDoctor runNxrsDoctor(const QString& nxrsBuild, const QProcessEnvironment& environment, int timeoutMs = 60000);
+
+// Saves of the two builds of one game (Turbo's in <build folder>, nxrs's in "<build folder> [nxrs]"): both keep them in
+// <name>_data\save\. Turbo (runtime/svc_fs.c) has one folder per save type: user (every account's saves), device,
+// cache, bcat, temp; its runtimes before the split kept everything in system. nxrs (os services/fs.rs) has one folder
+// per account (user1 is the first), device, cache<n>, temp, system\<id>, and makes user<n> / device transactional
+// (<folder>.work / .new / .old beside them while a game runs). What is copied: user <-> user1 (Turbo's old system
+// when it has no user), device <-> device, cache <-> cache0; temporary data and BCAT are not.
+struct SaveFolderPair {
+    QString from, to;   // absolute
+};
+QString saveFolder(const QString& buildDir, const QString& outputName);   // <buildDir>/<outputName>_data/save
+QVector<SaveFolderPair> saveCopyPlan(const QString& fromSave, const QString& fromEngine, const QString& toSave);
+// The other engine's build of this game holds saves this one can take.
+bool otherBuildHasSaves(const Game& game);
+// Copies the other engine's saves of `game` into the build of its current engine. The destination's save folder is
+// backed up first (copied whole to save-backup-<time> beside it; `backup` gets its path, empty when there was nothing
+// to back up). `report` lists what was copied. The source is only read.
+bool copySavesFromOtherEngine(const Game& game, QString* backup, QString* report, QString* error);
 
 // Add-on content (DLC). The engine installs a package into the built game's data folder (switchrecomp.py
 // --install-dlc / --sync-dlc: <data>/dlc.manifest plus <data>/dlc/<title id>/); the launcher keeps the list of

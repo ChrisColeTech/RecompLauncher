@@ -232,7 +232,7 @@ Window::Window(const QString& file,const QString& root,bool isDemo):library(file
 void Window::createActions(){
     auto make=[this](const QString& name,const QString& icon,const QString& tip){auto* a=new QAction(commandIcon(icon),name,this);a->setProperty("iconKind",icon);a->setToolTip(tip);return a;};
     addAction=make("Add game","add","Add a NUP/NSP package or NRO (Ctrl+O)");addAction->setShortcut(QKeySequence("Ctrl+O"));
-    connect(addAction,&QAction::triggered,this,[this]{for(const auto& p:QFileDialog::getOpenFileNames(this,"Add game",{},"Game packages (*.nup *.nsp *.nro)"))importSource(p);});
+    connect(addAction,&QAction::triggered,this,[this]{for(const auto& p:QFileDialog::getOpenFileNames(this,"Add game",{},"Game packages (*.nup *.nsp *.xci *.nro)"))importSource(p);});
     addFolderAction=make("Add extracted folder…","folder","Add a folder containing ExeFS and RomFS");
     connect(addFolderAction,&QAction::triggered,this,[this]{auto p=QFileDialog::getExistingDirectory(this,"Add extracted game folder");if(!p.isEmpty())importSource(p);});
     importAction=make("Import build…","import","Add an already compiled game to your library");
@@ -246,6 +246,9 @@ void Window::createActions(){
     installKeysAction=new QAction("Install keys…",this);connect(installKeysAction,&QAction::triggered,this,&Window::installKeys);
     folderAction=make("Open build folder","folder","Open generated game files");connect(folderAction,&QAction::triggered,this,[this]{openFolder();});
     saveFolderAction=new QAction("Open save folder",this);connect(saveFolderAction,&QAction::triggered,this,[this]{openFolder(true);});
+    copySavesAction=new QAction("Copy saves from the Turbo build…",this);copySavesAction->setObjectName("CopySaves");
+    copySavesAction->setToolTip("Copy this game's saves from its build with the other engine (this build's saves are backed up first)");
+    connect(copySavesAction,&QAction::triggered,this,[this]{copySaves();});
     logAction=make("View game log","log","Open the runtime log");connect(logAction,&QAction::triggered,this,[this]{openGameFile(".log");});
     removeAction=new QAction("Remove from library…",this);connect(removeAction,&QAction::triggered,this,&Window::removeGame);
     installDlcAction=new QAction("Install DLC…",this);installDlcAction->setObjectName("InstallDlc");
@@ -270,7 +273,7 @@ void Window::createMenusAndToolbar(){
     auto* file=menus->addMenu("&File");file->addAction(addAction);file->addAction(addFolderAction);file->addAction(importAction);
     file->addSeparator();file->addAction(settingsAction);
     file->addSeparator();file->addAction("Exit",QKeySequence("Alt+F4"),this,&QWidget::close);
-    auto* game=menus->addMenu("&Game");game->addAction(playAction);game->addAction(stopAction);game->addAction(buildAction);game->addSeparator();game->addAction(installDlcAction);game->addAction(installUpdatesAction);game->addSeparator();game->addAction(removeAction);
+    auto* game=menus->addMenu("&Game");game->addAction(playAction);game->addAction(stopAction);game->addAction(buildAction);game->addSeparator();game->addAction(installDlcAction);game->addAction(installUpdatesAction);game->addAction(copySavesAction);game->addSeparator();game->addAction(removeAction);
     auto* keys=menus->addMenu("&Keys");keys->addAction(installKeysAction);keys->addAction("Open keys folder",this,[this]{const auto path=QFileInfo(library.keysPath).absolutePath();if(QDir(path).exists())QDesktopServices::openUrl(QUrl::fromLocalFile(path));});
     auto* view=menus->addMenu("&View");view->setObjectName("ViewMenu");view->addAction(galleryAction);view->addAction(tableAction);view->addSeparator();view->addAction(filterAction);view->addAction(backgroundAction);
     view->addAction("Refresh library",QKeySequence("F5"),this,[this]{invalidateArtwork();refreshTools();refreshLibrary();});
@@ -419,7 +422,9 @@ void Window::refreshSelection(){
     installDlcAction->setEnabled(exists&&!demo);   // the DLC window opens read-only for a game that is running or building
     installUpdatesAction->setEnabled(exists&&!demo);
     buildAction->setText(exists&&g->updatePending()?"Rebuild":"Build");
-    folderAction->setEnabled(exists);saveFolderAction->setEnabled(exists&&g->hasBuild());logAction->setEnabled(exists&&QFileInfo(QDir(g->buildDir).filePath(g->outputName+".log")).exists());
+    folderAction->setEnabled(exists);saveFolderAction->setEnabled(exists&&g->hasBuild());
+    copySavesAction->setText(exists&&g->nxrs()?"Copy saves from the Turbo build…":"Copy saves from the nxrs build…");
+    copySavesAction->setEnabled(exists&&!demo&&g->hasBuild()&&!playing&&!building&&otherBuildHasSaves(*g));logAction->setEnabled(exists&&QFileInfo(QDir(g->buildDir).filePath(g->outputName+".log")).exists());
     const QString version=g?g->version():QString{};
     const QString info=g?g->title+" · "+g->format()+(version.isEmpty()?QString{}:" · v"+version)+" · "+g->renderer:"No selection";
     selectionLabel->setText(fontMetrics().elidedText(info,Qt::ElideRight,390));selectionLabel->setToolTip(g?info+"\n"+displayPath(g->source):info);
@@ -659,7 +664,7 @@ bool Window::editGame(Game& game,int tab,bool adding){
     QDialog dialog(this);dialog.setWindowTitle(adding?"Add game":game.title+" — Properties");dialog.resize(670,400);
     auto* layout=new QVBoxLayout(&dialog);layout->setContentsMargins(10,10,10,10);auto* tabs=new QTabWidget;layout->addWidget(tabs,1);
     auto* general=tabForm(tabs,"General");auto* title=new QLineEdit(game.title);auto* source=new QLineEdit(game.source.isEmpty()?QString{}:displayPath(game.source));
-    general->addRow("Display name",title);auto* sourceField=browseField(source,&dialog,"Choose source","Game packages (*.nup *.nsp *.nro);;All files (*)");sourceField->setEnabled(!locked);general->addRow("Source",sourceField);
+    general->addRow("Display name",title);auto* sourceField=browseField(source,&dialog,"Choose source","Game packages (*.nup *.nsp *.xci *.nro);;All files (*)");sourceField->setEnabled(!locked);general->addRow("Source",sourceField);
     auto* folder=new QPushButton("Choose extracted folder…");folder->setEnabled(!locked);general->addRow("",folder);connect(folder,&QPushButton::clicked,&dialog,[&dialog,source]{auto p=QFileDialog::getExistingDirectory(&dialog,"Choose extracted game folder");if(!p.isEmpty())source->setText(QDir::toNativeSeparators(p));});
     general->addRow("Format",textLabel(game.format()));if(!game.version().isEmpty())general->addRow("Version",textLabel(game.version()));general->addRow("Status",textLabel(adding?"Not built":statusFor(game)));
     auto* pathsNote=textLabel("NUP/NSP game data stays in the original package. Changing the source requires a rebuild.","Muted");pathsNote->setWordWrap(true);general->addRow(pathsNote);
@@ -754,6 +759,26 @@ void Window::showSettings(int initialTab){
     toolkit->addRow("nxrs-build",browseField(nxrsBuild,&dialog,"Choose nxrs-build (a development engine)",QString("nxrs-build (nxrs-build%1);;All files (*)").arg(executableSuffix)));
     auto* health=textLabel(healthText,"Muted");health->setWordWrap(true);health->setTextInteractionFlags(Qt::TextSelectableByMouse);toolkit->addRow(health);
     connect(this,&Window::toolsChanged,&dialog,[this,health]{health->setText(healthText);});
+    // nxrs-build doctor: Vulkan devices, free disk, toolchain and the rest, run when the page opens
+    auto* doctor=textLabel(tools.nxrsBuild.isEmpty()?QString("nxrs-build not found: no checks."):QString("Checking (nxrs-build doctor)…"),"Muted");
+    doctor->setObjectName("NxrsDoctor");doctor->setWordWrap(true);doctor->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    auto* recheck=new QPushButton("Check again");recheck->setEnabled(!tools.nxrsBuild.isEmpty());
+    auto* doctorBox=new QWidget;auto* doctorLayout=new QVBoxLayout(doctorBox);doctorLayout->setContentsMargins(0,0,0,0);doctorLayout->addWidget(doctor);doctorLayout->addWidget(recheck,0,Qt::AlignLeft);
+    toolkit->addRow("nxrs checks",doctorBox);
+    const auto runDoctor=[this,doctor,recheck,&dialog]{
+        if(tools.nxrsBuild.isEmpty())return;
+        doctor->setText("Checking (nxrs-build doctor)…");recheck->setEnabled(false);
+        auto* p=new QProcess(&dialog);p->setProgram(tools.nxrsBuild);p->setArguments(nxrsDoctorArguments());
+        p->setWorkingDirectory(QFileInfo(tools.nxrsBuild).absolutePath());p->setProcessEnvironment(tools.environment());p->setProcessChannelMode(QProcess::MergedChannels);
+        connect(p,qOverload<int,QProcess::ExitStatus>(&QProcess::finished),doctor,[doctor,recheck,p](int code,QProcess::ExitStatus status){
+            const auto d=parseNxrsDoctor(QString::fromUtf8(p->readAll()),status==QProcess::NormalExit?code:-1);
+            doctor->setText((d.ok()?QString("All checks passed."):QString("%1 check(s) failed.").arg(qMax(1,d.failed())))+"\n"+d.text());
+            recheck->setEnabled(true);p->deleteLater();
+        });
+        connect(p,&QProcess::errorOccurred,doctor,[doctor,recheck,p](QProcess::ProcessError e){if(e==QProcess::FailedToStart){doctor->setText("nxrs-build doctor did not start: "+p->errorString());recheck->setEnabled(true);}});
+        p->start();QTimer::singleShot(60000,p,[p]{if(p->state()!=QProcess::NotRunning)p->kill();});
+    };
+    connect(recheck,&QPushButton::clicked,&dialog,runDoctor);QTimer::singleShot(0,&dialog,runDoctor);
     // the setup guide is a source-checkout document; a release has nothing to set up and does not ship docs/
     const QString guidePath=QDir(toolkitProjectRoot(library.toolRoot)).filePath("docs/BUILD_ENVIRONMENT_GUIDE.md");
     if(QFileInfo(guidePath).isFile()){auto* guide=new QPushButton("Open setup guide");toolkit->addRow("",guide);connect(guide,&QPushButton::clicked,&dialog,[guidePath]{QDesktopServices::openUrl(QUrl::fromLocalFile(guidePath));});}
@@ -832,6 +857,13 @@ void Window::play(){
     if(dlcInstaller.busy())return;
     if(adoptInstalledDlc(*game))save();
     if(!dlcUpToDate(*game)){startDlcSync(game->id,DlcPlay);return;}
+    // switched engines: the other build's saves are offered once (a copy, after a backup of this build's)
+    if(game->savesOffered.isEmpty()&&otherBuildHasSaves(*game)){
+        const QString other=game->nxrs()?"Turbo":"nxrs";
+        game->savesOffered=game->nxrs()?engineTurbo:engineNxrs;save();
+        const auto answer=QMessageBox::question(this,"Copy saves",QString("The %1 build of “%2” has saves. Copy them into this build before playing?\n\nThis build's save folder is backed up first (save-backup-<time> beside it). Asked once; Game > Copy saves does it later.").arg(other,game->title),QMessageBox::Yes|QMessageBox::No,QMessageBox::No);
+        if(answer==QMessageBox::Yes){copySaves(true,false);game=selected();if(!game)return;}
+    }
     QString error;if(!writeGameSettings(*game,library.buttonLayout,&error)){message("Cannot save game settings",error,true);return;}
     QProcess process;process.setProgram(game->executable());process.setWorkingDirectory(game->buildDir);auto env=tools.environment();
     process.setProcessEnvironment(env);qint64 pid=0;if(!process.startDetached(&pid)){message("Could not launch",process.errorString(),true);return;}
@@ -846,6 +878,21 @@ void Window::stop(){
 }
 void Window::openGameFile(const QString& suffix){auto* game=selected();if(!game)return;const auto path=QDir(game->buildDir).filePath(game->outputName+suffix);if(!QFileInfo::exists(path)){message("File not available","Run this game once to create its log and settings.");return;}QDesktopServices::openUrl(QUrl::fromLocalFile(path));}
 void Window::openFolder(bool saves){auto* game=selected();if(!game)return;const QString path=saves?QDir(game->dataDir()).filePath("save"):game->buildDir;if(!QDir(path).exists()){message("Folder not available",saves?"This game has not created a save folder yet.":"Build this game first to create its output folder.");return;}QDesktopServices::openUrl(QUrl::fromLocalFile(path));}
+void Window::copySaves(bool interactive,bool confirm){
+    auto* game=selected();
+    const auto done=[this,interactive](bool okay,const QString& title,const QString& detail){
+        if(interactive)message(title,detail,!okay);else console->appendPlainText("\n"+title+": "+detail);
+        emit saveCopyFinished(okay,detail);
+    };
+    if(!game||demo){done(false,"Cannot copy saves","Select a game first.");return;}
+    if(running.contains(game->id)||(builder.busy()&&builder.gameId()==game->id)){done(false,"Cannot copy saves","Close the game (or wait for its build) first.");return;}
+    const QString other=game->nxrs()?"Turbo":"nxrs";
+    if(interactive&&confirm&&QMessageBox::question(this,"Copy saves",QString("Copy the saves of the %1 build of “%2” into this build?\n\nThis build's save folder is backed up first; the %1 build's saves are only read.").arg(other,game->title))!=QMessageBox::Yes)return;
+    QString backup,report,error;
+    if(!copySavesFromOtherEngine(*game,&backup,&report,&error)){done(false,"Cannot copy saves",error);return;}
+    game->savesOffered=game->nxrs()?engineTurbo:engineNxrs;save();refreshSelection();
+    done(true,"Saves copied",report+(backup.isEmpty()?QString("\nThis build had no saves; nothing to back up."):"\nBackup of this build's saves: "+QDir::toNativeSeparators(backup)));
+}
 void Window::removeGame(){
     auto* game=selected();if(!game||running.contains(game->id)||(builder.busy()&&builder.gameId()==game->id))return;
     if(QMessageBox::question(this,"Remove from library","Remove “"+game->title+"” from the library?\n\nYour package, builds, and saves will not be deleted.")!=QMessageBox::Yes)return;

@@ -58,10 +58,16 @@ public:
     bool installUpdatePackages(const QStringList& files, bool interactive = true);
     void removeUpdates(const QStringList& packages);
     void chooseUpdate(const QString& choice);   // "newest", "none" or a package path
+    // Game > Copy saves from the Turbo / nxrs build: the other engine's saves of the selected game into this build's,
+    // after a backup. Not interactive: no dialogs, the outcome is saveCopyFinished.
+    void copySaves(bool interactive = true, bool confirm = true);
+    void showEngineSettings() { showSettings(0); }
+    NxrsDoctor nxrsDoctor() const { return runNxrsDoctor(tools.nxrsBuild, tools.environment()); }
 signals:
     void smokeFinished(bool success);
     void dlcFinished(bool success, const QString& detail);
     void updateFinished(bool success, const QString& detail);
+    void saveCopyFinished(bool success, const QString& detail);
     void toolsChanged();
 protected:
     void dragEnterEvent(QDragEnterEvent*) override;
@@ -144,7 +150,7 @@ private:
     int buildCurrent = 0, buildTotal = 0;
     QAction *addAction = nullptr, *addFolderAction = nullptr, *importAction = nullptr, *playAction = nullptr,
         *buildAction = nullptr, *stopAction = nullptr, *propertiesAction = nullptr, *removeAction = nullptr,
-        *folderAction = nullptr, *logAction = nullptr, *saveFolderAction = nullptr, *settingsAction = nullptr,
+        *folderAction = nullptr, *logAction = nullptr, *saveFolderAction = nullptr, *copySavesAction = nullptr, *settingsAction = nullptr,
         *galleryAction = nullptr, *tableAction = nullptr, *backgroundAction = nullptr, *buildOptionsAction = nullptr,
         *installKeysAction = nullptr, *installDlcAction = nullptr, *installUpdatesAction = nullptr;
 };

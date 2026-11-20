@@ -13,6 +13,10 @@ on:
         type: choice
         default: all
         options: [all, windows, linux]
+      nxrs_engine:
+        description: 'Bundle the nxrs engine (private repo ChrisColeTech/nxrs-engine; needs the NXRS_ENGINE_TOKEN secret)'
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -23,6 +27,13 @@ concurrency:
 
 env:
   ENGINE: third_party/Switch2RECOMP   # the engine submodule (turbo branch of Switch2RECOMP-turbo)
+  # The nxrs engine in the Windows bundle: OFF unless asked for. A manual run sets it with the nxrs_engine input; pushes
+  # (the VERSION-bump releases) only when the repository variable NXRS_ENGINE_IN_RELEASE is 'true'. Both need the
+  # secret NXRS_ENGINE_TOKEN (read access to the private engine repository). docs/LAUNCHER.md, "Release integration".
+  NXRS_ENGINE_ON: ${{ (github.event_name == 'workflow_dispatch' && inputs.nxrs_engine) || (github.event_name == 'push' && vars.NXRS_ENGINE_IN_RELEASE == 'true') }}
+  NXRS_ENGINE_REF: ${{ vars.NXRS_ENGINE_REF || 'main' }}
+  NXRS_RUST: '1.99.0'
+  NXRS_LLVM_MINGW: '20261104'
 
 jobs:
   build:
@@ -122,10 +133,50 @@ jobs:
           test -s "$ENGINE/runtime/av1/lin/libdav1d.a"
           python src/recomp_cli.py --build-runtime --target linux --backend x11 --cc gcc
           SWR_QT_PREFIX="$QT_ROOT_DIR" SWR_JOBS=4 sh scripts/build-launcher.sh
+      # ---- the nxrs engine (off by default, see NXRS_ENGINE_ON): checked out with the token, built for MSVC and gnullvm
+      - name: nxrs engine checkout
+        if: runner.os == 'Windows' && env.NXRS_ENGINE_ON == 'true'
+        uses: actions/checkout@v4
+        with:
+          repository: ChrisColeTech/nxrs-engine
+          ref: ${{ env.NXRS_ENGINE_REF }}
+          token: ${{ secrets.NXRS_ENGINE_TOKEN }}
+          path: build/nxrs-engine
+      - name: nxrs engine build
+        if: runner.os == 'Windows' && env.NXRS_ENGINE_ON == 'true'
+        shell: pwsh
+        working-directory: build/nxrs-engine
+        run: |
+          rustup toolchain install $env:NXRS_RUST --profile minimal --target x86_64-pc-windows-gnullvm
+          rustup default $env:NXRS_RUST
+          $name = "llvm-mingw-$env:NXRS_LLVM_MINGW-ucrt-x86_64"
+          Invoke-WebRequest "https://github.com/mstorsjo/llvm-mingw/releases/download/$env:NXRS_LLVM_MINGW/$name.zip" -OutFile llvm-mingw.zip
+          Expand-Archive llvm-mingw.zip -DestinationPath build/tools
+          Rename-Item "build/tools/$name" llvm-mingw
+          # graphics' GLSL: the glslangValidator built above (the shader compiler step put it on PATH)
+          $env:NXGFX_GLSLANG = (Get-Command glslangValidator).Source
+          cargo build --locked --release --jobs 4 -p cli -p front -p runtime
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          $env:PATH = "$pwd\build\tools\llvm-mingw\bin;$env:PATH"
+          $env:CC_x86_64_pc_windows_gnullvm = 'x86_64-w64-mingw32-clang'
+          cargo build --locked --release --jobs 4 --target x86_64-pc-windows-gnullvm -p front -p runtime
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          # the windows crate's import library the gnullvm engine links with (package-release.py takes it from here)
+          New-Item -ItemType Directory -Force build/tools/gnu-libs | Out-Null
+          $lib = Get-ChildItem "$env:USERPROFILE\.cargo\registry\src" -Recurse -Filter libwindows.0.52.0.a | Where-Object { $_.FullName -match 'gnullvm' } | Select-Object -First 1
+          if (-not $lib) { throw 'libwindows.0.52.0.a (windows_x86_64_gnullvm) not found' }
+          Copy-Item $lib.FullName build/tools/gnu-libs/
       - name: Package Windows
         if: runner.os == 'Windows'
         shell: pwsh
-        run: python scripts/package-release.py --deps build/release-deps --launcher bin/launcher --qt "$env:QT_ROOT_DIR"
+        run: |
+          $nxrs = @()
+          if ($env:NXRS_ENGINE_ON -eq 'true') {
+            $nxrs = @('--nxrs-engine', 'build/nxrs-engine', '--nxrs-target', 'build/nxrs-engine/target/release',
+                      '--nxrs-gnu', 'build/nxrs-engine/target/x86_64-pc-windows-gnullvm/release')
+          }
+          python scripts/package-release.py --deps build/release-deps --launcher bin/launcher --qt "$env:QT_ROOT_DIR" @nxrs
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
       - name: Package Linux
         if: runner.os == 'Linux'
         run: python scripts/package-release.py --deps build/release-deps --launcher bin/launcher-linux --qt "$QT_ROOT_DIR"

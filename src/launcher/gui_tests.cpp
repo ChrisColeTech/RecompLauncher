@@ -72,7 +72,8 @@ private slots:
         auto* bar=window.findChild<TitleBar*>();QVERIFY(bar);
         QMenu* game=nullptr;for(auto* action:bar->menuBar()->actions())if(action->text()=="&Game")game=action->menu();
         QVERIFY(game);QStringList names;for(auto* action:game->actions())names<<(action->isSeparator()?"-":action->text());
-        QCOMPARE(names,QStringList({"Play","Stop","Build","-","Install DLC…","Install Updates…","-","Remove from library…"}));
+        QCOMPARE(names,QStringList({"Play","Stop","Build","-","Install DLC…","Install Updates…","Copy saves from the nxrs build…","-","Remove from library…"}));
+        auto* copy=window.findChild<QAction*>("CopySaves");QVERIFY(copy);QVERIFY(!copy->isEnabled());   // no other build, no saves
         auto* install=window.findChild<QAction*>("InstallDlc");QVERIFY(install);QVERIFY(game->actions().contains(install));
         QVERIFY(!install->isEnabled());                       // the preview library has nothing to install into
         window.show();QVERIFY(QTest::qWaitForWindowExposed(&window));

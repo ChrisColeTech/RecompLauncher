@@ -59,9 +59,12 @@ static QString engineFolder(const Game& game, const Toolchain& tools) {
 }
 bool BuildManager::start(const Game& next, const Toolchain& tools, int jobs, QString* error) {
     if (active) { *error = "Another build is already running."; return false; }
+    if (next.source.endsWith(".xci", Qt::CaseInsensitive) && !next.nxrs()) {
+        *error = "A card image (XCI) builds with the nxrs engine only: choose it in Properties > Build > Engine."; return false;
+    }
     if (!tools.canBuild(next.engine)) { *error = tools.problemFor(next.engine); return false; }
-    if (next.source.endsWith(".nsp", Qt::CaseInsensitive) && (tools.keys.isEmpty() || !QFileInfo(tools.keys).isFile())) {
-        *error = "NSP builds need prod.keys. Use Keys > Install keys first."; return false;
+    if ((next.source.endsWith(".nsp", Qt::CaseInsensitive) || next.source.endsWith(".xci", Qt::CaseInsensitive)) && (tools.keys.isEmpty() || !QFileInfo(tools.keys).isFile())) {
+        *error = QString(next.source.endsWith(".xci", Qt::CaseInsensitive) ? "XCI" : "NSP") + " builds need prod.keys. Use Keys > Install keys first."; return false;
     }
     if (!validSource(next.source, error)) return false;
     if (const auto* update = next.activeUpdate()) {
